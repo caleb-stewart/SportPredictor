@@ -1,9 +1,25 @@
 class Api::V1::ChlController < ApplicationController
 
     def index
-        @chl = WhlTeamStat.calc_rolling_average(params[:team_name], params[:window_size].to_i)
+        @home_team_stats = WhlTeamStat.calc_rolling_average(params[:home_team], params[:window_size].to_i)
+        @away_team_stats = WhlTeamStat.calc_rolling_average(params[:away_team], params[:window_size].to_i)
 
-        @test = WhlTeamStat.calc_last_k_avg_stats(params[:team_name], params[:window_size].to_i)
-        render json: { rolling_averages: @chl, last_k_stats: @test }
+        @home_latest_stats = WhlTeamStat.calc_last_k_avg_stats(params[:home_team], params[:window_size].to_i, 1)
+        @away_latest_stats = WhlTeamStat.calc_last_k_avg_stats(params[:away_team], params[:window_size].to_i, 0)
+        prediction_payload = {
+            past_stats: {
+            home_team: @home_team_stats,
+            away_team: @away_team_stats
+            },
+            predict_game: {
+            home_team: @home_latest_stats,
+            away_team: @away_latest_stats
+            }
+        }
+
+
+        @fart = MlChlService.calc_and_get_prediction(prediction_payload)
+        # @fart = MlChlService.calc_and_get_prediction({past_stats: {home_team: @home_team_stats}, away_team: @away_team_stats}, {predict_game: {home_team: @home_latest_stats, away_team: @away_latest_stats}})
+        render json: { test: @fart }
     end
 end

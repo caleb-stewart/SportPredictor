@@ -1,6 +1,7 @@
 class WhlTeamStat < ApplicationRecord
 
     def self.calc_rolling_average(target_team = "Spokane Chiefs", window_size = 5)
+
         # access the db to get all the stats for the target team, either home or away
         target_team_stats = WhlTeamStat.where("home_name = ? OR away_name = ?", target_team, target_team).order(:game_id)
 
@@ -76,7 +77,8 @@ class WhlTeamStat < ApplicationRecord
     averages
   end
 
-  def self.calc_last_k_avg_stats(target_team = "Spokane Chiefs", k = 5)
+  def self.calc_last_k_avg_stats(target_team = "Spokane Chiefs", k = 5, home_away = 0)
+    # home_away: 1 is home, 0 is away
     # Fetch the last K games involving the target team
     target_team_stats = WhlTeamStat.where("home_name = ? OR away_name = ?", target_team, target_team).order(:game_id).last(k)
 
@@ -91,12 +93,8 @@ class WhlTeamStat < ApplicationRecord
     opp_fowp = 0.0
     opp_sog = 0.0
 
-    home_away = 0.0
-    wins = 0
-
     target_team_stats.each do |game|
         is_home = game.home_name == target_team
-        home_away += is_home ? 1.0 : 0.0
 
         if is_home
             target_goals += game.home_goals
@@ -109,7 +107,6 @@ class WhlTeamStat < ApplicationRecord
             opp_fowp  += game.away_fowp
             opp_sog   += game.away_sog
 
-            wins += 1 if game.home_goals > game.away_goals
         else
             target_goals += game.away_goals
             target_ppp   += game.away_ppp
@@ -134,7 +131,7 @@ class WhlTeamStat < ApplicationRecord
         opponent_sog: opp_sog / k,
         target_fowp: target_fowp / k,
         opponent_fowp: opp_fowp / k,
-        home_away: 0,
+        home_away: home_away,
         goals_diff: (target_goals - opp_goals) / k,
         ppp_diff: (target_ppp - opp_ppp) / k,
         sog_diff: (target_sog - opp_sog) / k,
