@@ -1,0 +1,2 @@
+class WhlPredictionRecord < ApplicationRecord
+end

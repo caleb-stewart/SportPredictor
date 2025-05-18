@@ -10,7 +10,17 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_05_17_163258) do
+ActiveRecord::Schema[8.0].define(version: 2025_05_18_003416) do
+  create_table "whl_prediction_records", force: :cascade do |t|
+    t.integer "game_id"
+    t.integer "k_value"
+    t.float "home_prob"
+    t.float "away_prob"
+    t.integer "correct"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+  end
+
   create_table "whl_team_stats", force: :cascade do |t|
     t.integer "game_id"
     t.string "home_name"

@@ -23,6 +23,7 @@ def whl_predict():
     
     # Get the past stats for home and away teams from POST request body
     home_team_data = data['past_stats']['home_team']
+    # print("home_team_data head:", home_team_data)
     away_team_data = data['past_stats']['away_team']
 
     # Get the predicted game data for home and away teams from POST request body
