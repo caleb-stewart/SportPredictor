@@ -6,11 +6,12 @@
 # Read more: https://github.com/cyu/rack-cors
 
 Rails.application.config.middleware.insert_before 0, Rack::Cors do
-  allow do
-    origins "example.com"
+    allow do
+        origins '*'  # For development, allow all origins. For production, specify your frontend URL(s).
 
-    resource "*",
-      headers: :any,
-      methods: [:get, :post, :put, :patch, :delete, :options, :head]
+        resource '*',
+            headers: :any,
+            methods: [:get, :post, :put, :patch, :delete, :options, :head],
+            expose: ['Access-Control-Allow-Origin']
   end
 end

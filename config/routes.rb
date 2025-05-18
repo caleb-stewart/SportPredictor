@@ -6,7 +6,8 @@ Rails.application.routes.draw do
   get "up" => "rails/health#show", as: :rails_health_check
   namespace :api do
     namespace :v1 do
-        resources :chl, only: [:create, :index]
+        resources :chl, only: [:index]
+        get 'prediction-history', to: 'prediction_history#history'
     end
   end
 
