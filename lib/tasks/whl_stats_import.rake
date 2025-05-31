@@ -13,20 +13,24 @@ namespace :import do
 
     puts "Importing WHL team stats from #{csv_path}..."
     CSV.foreach(csv_path, headers: true, header_converters: :symbol) do |row|
-        puts row[:game_id]
-      WhlTeamStat.create!(
-        game_id: row[:game_id],
-        home_name: row[:home_name],
-        away_name: row[:away_name],
-        home_goals: row[:home_goals],
-        away_goals: row[:away_goals],
-        home_ppp: row[:home_pp],
-        away_ppp: row[:away_pp],
-        home_sog: row[:home_sog],
-        away_sog: row[:away_sog],
-        home_fowp: row[:home_fow],
-        away_fowp: row[:away_fow]
-      )
+        
+
+        if !WhlTeamStat.exists?(game_id: row[:game_id])
+          puts "Updating with game: ", row[:game_id]
+          WhlTeamStat.create!(
+            game_id: row[:game_id],
+            home_name: row[:home_name],
+            away_name: row[:away_name],
+            home_goals: row[:home_goals],
+            away_goals: row[:away_goals],
+            home_ppp: row[:home_pp],
+            away_ppp: row[:away_pp],
+            home_sog: row[:home_sog],
+            away_sog: row[:away_sog],
+            home_fowp: row[:home_fow],
+            away_fowp: row[:away_fow]
+          )
+        end
     end
 
     puts "WHL team stats successfully imported!"

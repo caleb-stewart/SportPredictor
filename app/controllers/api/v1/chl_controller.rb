@@ -19,7 +19,7 @@ class Api::V1::ChlController < ApplicationController
 
 
         @win_probs = MlChlService.calc_and_get_prediction(prediction_payload)
-        # @fart = MlChlService.calc_and_get_prediction({past_stats: {home_team: @home_team_stats}, away_team: @away_team_stats}, {predict_game: {home_team: @home_latest_stats, away_team: @away_latest_stats}})
+        
         render json: { win_probs: @win_probs, prediction_features: {home_team: @home_latest_stats, away_team: @away_latest_stats} }
     end
 end

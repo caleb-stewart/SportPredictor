@@ -7,13 +7,20 @@ class WhlDailyPredictionJob < ApplicationJob
     whl_api_service = WhlApiService.new
 
     # Get the list of games that are happening the next day
-    next_games = whl_api_service.game_id_url(1, 0)
+    next_games = whl_api_service.game_id_url(1, 2)
     next_games = next_games.dig('SiteKit', 'Scorebar') || []
 
     next_games.each do |game|
       home_team = game['HomeLongName']
       away_team = game['VisitorLongName']
       game_id = game['ID']
+
+      # If we have already predicted this game, skip it
+      # This is to prevent duplicate predictions for the same game
+      if WhlPredictionRecord.exists?(game_id: game_id)
+        puts "Game ID #{game_id} already has predictions. Skipping."
+        next
+      end
 
       [5, 10, 15].each do |k|
         home_past_stats = WhlTeamStat.calc_rolling_average(home_team, k)
