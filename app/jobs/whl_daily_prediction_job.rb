@@ -7,7 +7,7 @@ class WhlDailyPredictionJob < ApplicationJob
     whl_api_service = WhlApiService.new
 
     # Get the list of games that are happening the next day
-    next_games = whl_api_service.game_id_url(num_of_days_ahead=1, num_of_past_games=0)
+    next_games = whl_api_service.game_id_url(num_of_days_ahead=1, num_of_past_games=2)
     next_games = next_games.dig('SiteKit', 'Scorebar') || []
 
     next_games.each do |game|
@@ -40,7 +40,9 @@ class WhlDailyPredictionJob < ApplicationJob
           predict_game: {
             home_team: home_prediction_stats,
             away_team: away_prediction_stats
-          }
+          },
+          home_team: home_team,
+          away_team: away_team
         }
 
         # Get the game predictions for the next games
@@ -51,11 +53,15 @@ class WhlDailyPredictionJob < ApplicationJob
           k_value: k,
           home_prob: prediction['home_team_prob'],
           away_prob: prediction['away_team_prob'],
-          correct: nil
+          correct: nil,
+          home_team: home_team,
+          away_team: away_team
         )
 
         # return prediction
       end
     end
+
+    nil
   end
 end

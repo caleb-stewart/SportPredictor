@@ -5,11 +5,12 @@ module Api
       def history
         
         predictions = WhlPredictionRecord.all.order(created_at: :desc).limit(100)
-        # puts predictions.to_json
+        # puts "PREDICTIONS", predictions.to_json
 
         # Format the predictions into a structure that is used by the frontend
         formatted_predictions = format_predictions(predictions)
         
+        # puts "Formatted Predictions: ", formatted_predictions.to_json
         # Return the formatted predictions as JSON to frontend
         render json: formatted_predictions
 
@@ -42,24 +43,24 @@ module Api
         # Creates groups by game_id
         grouped = predictions.group_by(&:game_id)
 
+        puts "Grouped Predictions: ", grouped.to_json
+
         # Loop through each group (game_id) and format the predictions
         formatted_predictions = grouped.map do |game_id, records|
-
-          # Get the team names of this game
-          game_stats = WhlTeamStat.find_by(game_id: game_id)
 
           # Get the k_values and their probabilities from the predictions previously made
           k_values = records.map do |k_prediction|
 
+            # puts "K Prediction: ", k_prediction.to_json
             # Determine the key based on the k_value
             key = case k_prediction.k_value
             when 5 then '5'
             when 10 then '10'
             when 15 then '15'
-            end
+            end # case
 
             # Check if our prediction was correct
-            correct = correct_prediction?(k_prediction, game_stats)
+            correct = correct_prediction?(k_prediction)
             
 
             # Return the formatted k_value prediction
@@ -74,22 +75,20 @@ module Api
           # Return the formatted prediction for this game
           {
             game_id: game_id,
-            home_team: game_stats.home_name,
-            away_team: game_stats.away_name,
+            home_team: records.first.home_team,
+            away_team: records.first.away_team,
             k_values: k_values # this was the array of k_values made from above
           }
         end # grouped.map
 
       end # format_predictions()
 
-      def correct_prediction?(k_prediction, game_stats)
-        # Determine if the prediction was correct based on the game stats
-        if k_prediction.home_prob > k_prediction.away_prob
-          game_stats.home_goals > game_stats.away_goals
-        else
-          game_stats.home_goals < game_stats.away_goals
-        end
-      end
+      def correct_prediction?(k_prediction)
+
+        # Check the prediction record to see if our prediction was correct
+        WhlPredictionRecord.find_by(game_id: k_prediction.game_id, k_value: k_prediction.k_value).correct
+
+      end # correct_prediction?()
 
     end # class
   end # module V1

@@ -26,6 +26,9 @@ def whl_predict():
     # print("home_team_data head:", home_team_data)
     away_team_data = data['past_stats']['away_team']
 
+    home_team_name = data['home_team']
+    away_team_name = data['away_team']
+
     # Get the predicted game data for home and away teams from POST request body
     # Make sure this is a list of one dictionary
     home_team_pred = [data['predict_game']['home_team']]
@@ -49,7 +52,9 @@ def whl_predict():
     normalized_away_prob = away_prob / total_prob
 
     return jsonify({"home_team_prob": normalized_home_prob,
-                     "away_team_prob": normalized_away_prob})
+                     "away_team_prob": normalized_away_prob,
+                     "home_team": home_team_name,
+                     "away_team": away_team_name})
 
 if __name__ == "__main__":
     # Port: Eulers constant (2.718) :p

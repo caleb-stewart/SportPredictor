@@ -18,11 +18,7 @@ class WhlDailyUpdateJob < ApplicationJob
       # Get the game_id from game played yesterday
       game_id = game["ID"].to_i
 
-      # Skip if game already exists in database
-      if WhlTeamStat.exists?(game_id: game_id)
-        puts "Game ID #{game_id} already exists in database. Skipping."
-        next
-      end
+      
 
       # Fetch full game stats
       # uses the game_id to get the full game stats
@@ -32,6 +28,14 @@ class WhlDailyUpdateJob < ApplicationJob
       away_name = game_stats['GC']['Clock']['visiting_team']['name']
       home_goals = game_stats['GC']['Clock']['home_goal_count'].to_i
       away_goals = game_stats['GC']['Clock']['visiting_goal_count'].to_i
+
+      # Skip if game already exists in database
+      if WhlTeamStat.exists?(game_id: game_id)
+        puts "Game ID #{game_id} already exists in database. Skipping."
+        # Update the prediction records with the correct winner
+        update_prediction_records(game_id, home_goals, away_goals)
+        next
+      end
 
       # Compute Power Play Percentage
       home_pp_total = game_stats['GC']['Clock']['power_play']['total']['home'].to_f
@@ -62,6 +66,7 @@ class WhlDailyUpdateJob < ApplicationJob
         away_fowp = 0.5
       end
 
+      
       WhlTeamStat.create!(
         game_id: game_id,
         home_name: home_name,
@@ -80,6 +85,8 @@ class WhlDailyUpdateJob < ApplicationJob
       update_prediction_records(game_id, home_goals, away_goals)
 
     end
+
+    nil
   end
 
   def update_prediction_records(game_id, home_goals, away_goals)
@@ -88,10 +95,13 @@ class WhlDailyUpdateJob < ApplicationJob
 
     # Fetch and update all predictions for this game
     WhlPredictionRecord.where(game_id: game_id).find_each do |record|
+      puts "UPDATING PREDICTION RECORD: ", record.to_json
       # predicted winner is the record with the greater prob
       predicted_winner = record.home_prob > record.away_prob ? 1 : 0
       # update if the predicted winner was the actual winner
-      record.update(correct: predicted_winner == actual_winner ? 1 : 0)
+
+      puts "Predicted Winner: #{predicted_winner}, Actual Winner: #{actual_winner}"
+      record.update(correct: predicted_winner == actual_winner)
     end
   end
 end
