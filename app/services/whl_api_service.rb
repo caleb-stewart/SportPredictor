@@ -19,7 +19,7 @@ class WhlApiService
 
   end
 
-  def game_id_url(num_of_days_ahead, num_of_past_games, current_team_id = '')
+  def game_id_url(num_of_days_ahead=0, num_of_past_games=0, current_team_id = '')
 
     # This is all of the parameters that are used in the URL
     query = @default_params.merge( {

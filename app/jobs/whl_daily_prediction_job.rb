@@ -7,7 +7,7 @@ class WhlDailyPredictionJob < ApplicationJob
     whl_api_service = WhlApiService.new
 
     # Get the list of games that are happening the next day
-    next_games = whl_api_service.game_id_url(1, 2)
+    next_games = whl_api_service.game_id_url(num_of_days_ahead=1, num_of_past_games=0)
     next_games = next_games.dig('SiteKit', 'Scorebar') || []
 
     next_games.each do |game|

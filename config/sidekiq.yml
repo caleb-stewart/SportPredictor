@@ -1,0 +1,13 @@
+:scheduler:
+  :schedule:
+    whl_daily_update_job:
+      cron: "0 9 * * *" # Runs every day at 9 am
+      class: "WhlDailyUpdateJob"
+      queue: "default"
+      description: "Updates WHL data daily"
+
+    whl_prediction_daily_job:
+      cron: "0 9 * * *" # Runs every day at 9 am
+      class: "WhlPredictionDailyJob"
+      queue: "default"
+      description: "Runs WHL predictions daily"

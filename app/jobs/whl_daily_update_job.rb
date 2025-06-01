@@ -4,11 +4,13 @@ class WhlDailyUpdateJob < ApplicationJob
   # Updates the WHL team stats in the database with the last games played
   # Run this daily
   def perform(*args)
+
+    puts "RUNNING WHL DAILY PREDICTION JOB"
     whl_api_service = WhlApiService.new
 
     # Get the list of games that were played yesterday
     # We really only need this for the game_id, so we can get the full team stats
-    update_games = whl_api_service.game_id_url(0, 1)
+    update_games = whl_api_service.game_id_url(num_of_days_ahead=0, num_of_past_games=1)
     update_games = update_games['SiteKit']['Scorebar']
 
     # Go through each game played yesterday
