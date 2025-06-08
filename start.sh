@@ -16,8 +16,8 @@ rails s -p 3141 &
 echo "[BASH] Starting Flask server on port 2718..."
 python3 PredictorFlask/app.py &
 
-echo "[BASH] Starting React app on port 3000..."
-cd ../sport-predictor-frontend-vite
+echo "[BASH] Starting Vue app on port 5173..."
+cd ../sport-predictor-vue
 npm run dev &
 
 # Wait for all background jobs to finish (so the script doesn't exit immediately)
