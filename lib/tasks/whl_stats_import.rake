@@ -1,10 +1,10 @@
 # lib/tasks/whl_import.rake
-require 'csv'
+require "csv"
 
 namespace :import do
   desc "Import WHL team stats from CSV file"
   task whl_stats: :environment do
-    csv_path = Rails.root.join('db', 'data', 'All_teams_WHL_stats.csv')
+    csv_path = Rails.root.join("db", "data", "All_teams_WHL_stats.csv")
 
     unless File.exist?(csv_path)
       puts "CSV file not found at #{csv_path}"
@@ -13,8 +13,6 @@ namespace :import do
 
     puts "Importing WHL team stats from #{csv_path}..."
     CSV.foreach(csv_path, headers: true, header_converters: :symbol) do |row|
-        
-
         if !WhlTeamStat.exists?(game_id: row[:game_id])
           puts "Updating with game: ", row[:game_id]
           WhlTeamStat.create!(

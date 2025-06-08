@@ -4,30 +4,29 @@ class WhlDailyUpdateJob < ApplicationJob
   # Updates the WHL team stats in the database with the last games played
   # Run this daily
   def perform(*args)
-
     puts "RUNNING WHL DAILY PREDICTION JOB"
     whl_api_service = WhlApiService.new
 
     # Get the list of games that were played yesterday
     # We really only need this for the game_id, so we can get the full team stats
     update_games = whl_api_service.game_id_url(num_of_days_ahead=0, num_of_past_games=1)
-    update_games = update_games['SiteKit']['Scorebar']
+    update_games = update_games["SiteKit"]["Scorebar"]
 
     # Go through each game played yesterday
     update_games.each do |game|
       # Get the game_id from game played yesterday
       game_id = game["ID"].to_i
 
-      
+
 
       # Fetch full game stats
       # uses the game_id to get the full game stats
       game_stats = whl_api_service.get_game_stats_url(game_id)
 
-      home_name = game_stats['GC']['Clock']['home_team']['name']
-      away_name = game_stats['GC']['Clock']['visiting_team']['name']
-      home_goals = game_stats['GC']['Clock']['home_goal_count'].to_i
-      away_goals = game_stats['GC']['Clock']['visiting_goal_count'].to_i
+      home_name = game_stats["GC"]["Clock"]["home_team"]["name"]
+      away_name = game_stats["GC"]["Clock"]["visiting_team"]["name"]
+      home_goals = game_stats["GC"]["Clock"]["home_goal_count"].to_i
+      away_goals = game_stats["GC"]["Clock"]["visiting_goal_count"].to_i
 
       # Skip if game already exists in database
       if WhlTeamStat.exists?(game_id: game_id)
@@ -38,10 +37,10 @@ class WhlDailyUpdateJob < ApplicationJob
       end
 
       # Compute Power Play Percentage
-      home_pp_total = game_stats['GC']['Clock']['power_play']['total']['home'].to_f
+      home_pp_total = game_stats["GC"]["Clock"]["power_play"]["total"]["home"].to_f
       # If there are no goals or no power plays, set goals to 0.0
       # This is a workaround for the API returning nil for pp goals
-      home_pp_goals = game_stats['GC']['Clock']['power_play']['goals']['home']&.to_f || 0.0
+      home_pp_goals = game_stats["GC"]["Clock"]["power_play"]["goals"]["home"]&.to_f || 0.0
       # if there are no power plays, set ppp to 0.0, else compute ppp
       home_ppp = home_pp_total > 0 ? (home_pp_goals / home_pp_total) : 0.0
 
@@ -66,7 +65,7 @@ class WhlDailyUpdateJob < ApplicationJob
         away_fowp = 0.5
       end
 
-      
+
       WhlTeamStat.create!(
         game_id: game_id,
         home_name: home_name,
@@ -83,7 +82,6 @@ class WhlDailyUpdateJob < ApplicationJob
 
       # Update the prediction records with the correct winner
       update_prediction_records(game_id, home_goals, away_goals)
-
     end
 
     nil

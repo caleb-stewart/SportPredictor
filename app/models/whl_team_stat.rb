@@ -1,7 +1,5 @@
 class WhlTeamStat < ApplicationRecord
-
     def self.calc_rolling_average(target_team = "Spokane Chiefs", window_size = 5)
-
         # access the db to get all the stats for the target team, either home or away
         target_team_stats = WhlTeamStat.where("home_name = ? OR away_name = ?", target_team, target_team).order(:game_id)
 
@@ -45,7 +43,7 @@ class WhlTeamStat < ApplicationRecord
                     opp_sog += game.home_sog
                 end
             end
-        
+
         # Get the last game in the window to determine if it was a home or away game
         last_game = window.last
         is_home = last_game.home_name == target_team
@@ -135,8 +133,7 @@ class WhlTeamStat < ApplicationRecord
         goals_diff: (target_goals - opp_goals) / k,
         ppp_diff: (target_ppp - opp_ppp) / k,
         sog_diff: (target_sog - opp_sog) / k,
-        fowp_diff: (target_fowp - opp_fowp) / k,
+        fowp_diff: (target_fowp - opp_fowp) / k
     }
     end
-
 end
