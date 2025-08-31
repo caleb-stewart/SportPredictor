@@ -20,7 +20,10 @@ python3 PredictorFlask/app.py &
 
 echo "[BASH] Starting Vue app on port 5173..."
 cd ../sport-predictor-vue
-npm run dev &
+yarn dev &
+
+open http://localhost:5173/
 
 # Wait for all background jobs to finish (so the script doesn't exit immediately)
 wait
+ 
