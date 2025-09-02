@@ -1,0 +1,299 @@
+SportPredictor TODO:
+
+Move from SQLite3 to Postgres
+- Right now my rails api is using the default sqlite3 db. I want to use a postgres database, where eventually I can host it somewhere on a server.
+- Make it so it can be deployed evantually. If this it too much work initially, then we dont have to worry about it.
+- make sure migrations and seeding still works
+
+Right now I am only storing about the past 500 games for each team. I want to make this the past 2000 games.
+- We need to utilize this external api to get to results. 
+https://lscluster.hockeytech.com/feed/?feed=modulekit&key=41b145a848f4bd67&view=scorebar&client_code=whl&numberofdaysahead=0&numberofdaysback=1000&season_id=&team_id={team_id}&lang_code=en&fmt=json
+Where each team is: team_id = {'Spokane Chiefs': '215', 'Seattle Thunderbirds': '214', 'Portland Winterhawks': '208', 'Everett Silvertips': '226', 'Tri-City Americans': '217', 'Kamloops Blazers': '203', 'Kelowna Rockets': '204', 'Prince George Cougars': '210', 'Brandon Wheat Kings': '201', 'Swift Current Broncos': '216', 'Vancouver Giants': '223', 'Victoria Royals': '227', 'Medicine Hat Tigers': '206', 'Edmonton Oil Kings': '228', 'Moose Jaw Warriors': '207', 'Regina Pats': '212', 'Saskatoon Blades': '213', 'Prince Albert Raiders': '209', 'Calgary Hitmen': '202', 'Lethbridge Hurricanes': '205', 'Red Deer Rebels': '211', 'Wenatchee Wild': '222'}
+- We only get 1000 games back at a time, so numberofdaysback=1000 gets us most recent game - 1000 games previous
+	-  numberofdaysback=2000 gets us 1000 games previous - 2000 games previous
+- This api only gets us the game ID, not the actual game stats. To get the stats we need to call this other external api
+https://lscluster.hockeytech.com/feed/?feed=gc&key=41b145a848f4bd67&game_id={game_id}&client_code=whl&tab=clock&lang_code=en&fmt=json
+	- Where each game_id represents one of the 2000 game id for each team
+- Obviously We do not want to fetch calls for games that we have already fetched (because each of these teams play each other), be aware of that.
+Insert the WHL_team_stats_script.ipynb implmentation here. We want to make this a rake task, that probably sends the game stat requests in batches at random intervals. We do not want to be rate limited to blocked by the api.
+I care about all the stats I kept in the python script, but I also want to store the season_id, season_name, and game_date_iso_8601. We will need to ensure that the appropriate data I am fetching I am able to store it in our database.
+
+
+Lets start with fetching upcoming games. Everyday at 9am I want to trigger a sidekiq job that fetches the upcoming games for the next day (numofdaysahead=1). We only store team stats. When I do this, I want to store the gameid, home team and away team (and any other stat I can keep track of without the game being complete, like game date or someting) in the WhlTeamStats, and set the completed flag to be 'false'.
+- At the same time as fetching the upcoming games, I also want to make predictions for the upcoming games we just fetched. I want to make predictions based on the last 5, 10, and 15 games. I want to save these predictions into the WhlPredictionRecords table, where I save the teams, the team who I think is going to win, the probabilities of each team winning, and the k-value (5, 10, or 15)
+- To quickly calculate a prediction, I want to store the rolling averages of the last 5, 10, and 15 games into a new database table. To do this, I was thinking of having the game_id represent the rolling averages up to the the game_id. For example, game_id and k=5 would represent the average stats of games 1000, 999, 9998, 9997, 9996. I want to keep track of all of the games for each team in this table. game_id and k_value would probably be the primary id.
+- When a prediction is calculated (this is done by sending the data off to another api I made), I want to store these results in the WhlPredictionRecords table, which will include the game_id, k-value, predicted winner, and home team winning probability, and away team probabilty (maybe more information). 
+
+Also at 9am as a sidekiq job, I want to fetch the results of the previous games played yesterday (numofdaysback=1), where I fetch the stats of the completed games. I will add these stats and winner to the WhlTeamStats row, where there should already be a row with empty values (maybe use find_or_create_by just in case???).
+- Whenever I get the actual results of the games, I want to update the WhlPredictionRecords, where I update the 'correct' column with whether I had a correct prediction for each k_values
+
+
+When we go to the WHL page, I want to quickly be able to see the upcoming games that are happening, and the probabilities for each team winning. For this we will need to add a completed tab in the WhlTeamStats db, where 'true' means the game has been played, so stats are available, and 'false' means the game has not been played, so stats are not available.
+
+
+Based on this query: https://lscluster.hockeytech.com/feed/?feed=modulekit&key=41b145a848f4bd67&view=scorebar&client_code=whl&numberofdaysahead=0&numberofdaysback=1000&season_id=&team_id=215&lang_code=en&fmt=json
+This is the response we get
+{
+  "SiteKit": {
+    "Parameters": {
+      "feed": "modulekit",
+      "key": "41b145a848f4bd67",
+      "view": "scorebar",
+      "client_code": "whl",
+      "numberofdaysahead": "0",
+      "numberofdaysback": "1000",
+      "season_id": "289",
+      "team_id": "215",
+      "lang_code": "en",
+      "fmt": "json",
+      "lang_id": 1,
+      "league_id": "26"
+    },
+    "Scorebar": [
+      {
+        "ID": "1009079",
+        "SeasonID": "242",
+        "league_id": "26",
+        "game_number": "124",
+        "game_letter": "",
+        "game_type": "",
+        "quick_score": "0",
+        "Date": "2012-10-19",
+        "FloCoreEventId": "",
+        "FloLiveEventId": "",
+        "GameDate": "Fri, Oct 19",
+        "GameDateISO8601": "2012-10-19T19:05:00-07:00",
+        "ScheduledTime": "19:05:00",
+        "ScheduledFormattedTime": "7:05 pm",
+        "Timezone": "Canada/Pacific",
+        "TicketUrl": "",
+        "HomeID": "215",
+        "HomeCode": "SPO",
+        "HomeCity": "Spokane",
+        "HomeNickname": "Spokane",
+        "HomeLongName": "Spokane Chiefs",
+        "HomeDivision": "U.S. Division",
+        "HomeGoals": "2",
+        "HomeAudioUrl": "",
+        "HomeVideoUrl": "",
+        "HomeWebcastUrl": "",
+        "VisitorID": "214",
+        "VisitorCode": "SEA",
+        "VisitorCity": "Seattle",
+        "VisitorNickname": "Seattle",
+        "VisitorLongName": "Seattle Thunderbirds",
+        "VisitingDivision": "U.S. Division",
+        "VisitorGoals": "1",
+        "VisitorAudioUrl": "",
+        "VisitorVideoUrl": "",
+        "VisitorWebcastUrl": "",
+        "Period": "3",
+        "PeriodNameShort": "3",
+        "PeriodNameLong": "3rd",
+        "GameClock": "00:00",
+        "GameSummaryUrl": "1009079",
+        "HomeWins": "44",
+        "HomeRegulationLosses": "26",
+        "HomeOTLosses": "2",
+        "HomeShootoutLosses": "0",
+        "VisitorWins": "24",
+        "VisitorRegulationLosses": "38",
+        "VisitorOTLosses": "7",
+        "VisitorShootoutLosses": "3",
+        "GameStatus": "4",
+        "Intermission": "0",
+        "GameStatusString": "Final",
+        "GameStatusStringLong": "Final",
+        "Ord": "2012-10-19 22:05:00.000000",
+        "venue_name": "Spokane Veterans Memorial Arena - Spokane, WA",
+        "venue_location": "Spokane, WA",
+        "league_name": "Western Hockey League",
+        "league_code": "whl",
+        "TimezoneShort": "PDT",
+        "HomeLogo": "https://assets.leaguestat.com/whl/logos/215.png",
+        "VisitorLogo": "https://assets.leaguestat.com/whl/logos/214.png",
+        "FloHockeyUrl": "",
+        "combined_client_code": null
+      },
+      {
+        "ID": "1009087",
+        "SeasonID": "242",
+        "league_id": "26",
+        "game_number": "132",
+        "game_letter": "",
+        "game_type": "",
+        "quick_score": "0",
+        "Date": "2012-10-20",
+        "FloCoreEventId": "",
+        "FloLiveEventId": "",
+        "GameDate": "Sat, Oct 20",
+        "GameDateISO8601": "2012-10-20T19:05:00-07:00",
+        "ScheduledTime": "19:05:00",
+        "ScheduledFormattedTime": "7:05 pm",
+        "Timezone": "Canada/Pacific",
+        "TicketUrl": "",
+        "HomeID": "215",
+        "HomeCode": "SPO",
+        "HomeCity": "Spokane",
+        "HomeNickname": "Spokane",
+        "HomeLongName": "Spokane Chiefs",
+        "HomeDivision": "U.S. Division",
+        "HomeGoals": "3",
+        "HomeAudioUrl": "",
+        "HomeVideoUrl": "",
+        "HomeWebcastUrl": "",
+        "VisitorID": "210",
+        "VisitorCode": "P.G",
+        "VisitorCity": "Prince George",
+        "VisitorNickname": "Prince George",
+        "VisitorLongName": "Prince George Cougars",
+        "VisitingDivision": "B.C. Division",
+        "VisitorGoals": "2",
+        "VisitorAudioUrl": "",
+        "VisitorVideoUrl": "",
+        "VisitorWebcastUrl": "",
+        "Period": "3",
+        "PeriodNameShort": "3",
+        "PeriodNameLong": "3rd",
+        "GameClock": "00:00",
+        "GameSummaryUrl": "1009087",
+        "HomeWins": "44",
+        "HomeRegulationLosses": "26",
+        "HomeOTLosses": "2",
+        "HomeShootoutLosses": "0",
+        "VisitorWins": "21",
+        "VisitorRegulationLosses": "43",
+        "VisitorOTLosses": "2",
+        "VisitorShootoutLosses": "6",
+        "GameStatus": "4",
+        "Intermission": "0",
+        "GameStatusString": "Final",
+        "GameStatusStringLong": "Final",
+        "Ord": "2012-10-20 22:05:00.000000",
+        "venue_name": "Spokane Veterans Memorial Arena - Spokane, WA",
+        "venue_location": "Spokane, WA",
+        "league_name": "Western Hockey League",
+        "league_code": "whl",
+        "TimezoneShort": "PDT",
+        "HomeLogo": "https://assets.leaguestat.com/whl/logos/215.png",
+        "VisitorLogo": "https://assets.leaguestat.com/whl/logos/210.png",
+        "FloHockeyUrl": "",
+        "combined_client_code": null
+      }, ...
+	  
+Based on this query: https://lscluster.hockeytech.com/feed/?feed=gc&key=41b145a848f4bd67&game_id=1009078&game_id=1009079&game_id=1009080&client_code=whl&tab=clock&lang_code=en&fmt=json
+This is the response we get
+{
+  "GC": {
+    "Parameters": {
+      "feed": "gc",
+      "key": "41b145a848f4bd67",
+      "game_id": "1009080",
+      "client_code": "whl",
+      "tab": "clock",
+      "lang_code": "en",
+      "fmt": "json",
+      "lang_id": 1,
+      "static": 0
+    },
+    "Clock": {
+      "period": "3",
+      "game_clock": "00:03:25",
+      "game_date_iso_8601": "2012-10-19T19:00:00-06:00",
+      "timezone": "Canada/Mountain",
+      "timezone_short": "MDT",
+      "started": "1",
+      "game_number": "125",
+      "season_id": "242",
+      "season_name": "2012-13 Regular Season",
+      "home_team": {
+        "name": "Swift Current Broncos",
+        "team_id": "216",
+        "team_code": "S.C",
+        "team_nickname": "Swift Current",
+        "team_city": "Swift Current"
+      },
+      "visiting_team": {
+        "name": "Saskatoon Blades",
+        "team_id": "213",
+        "team_code": "SAS",
+        "team_nickname": "Saskatoon",
+        "team_city": "Saskatoon"
+      },
+      "text_game_summary": "/stats/text-game-report.php?game_id=1009080",
+      "official_game_report": "/stats/official-game-report.php?game_id=1009080",
+      "home_audio_url": "",
+      "home_video_url": "",
+      "home_webcast_url": "",
+      "visiting_audio_url": "",
+      "visiting_video_url": "",
+      "visiting_webcast_url": "",
+      "tickets_url": "",
+      "venue": "InnovationPlex - Swift Current, SK",
+      "final": "1",
+      "status": "4",
+      "home_goal_count": "2",
+      "visiting_goal_count": "1",
+      "progress": "Final",
+      "progress_short": "Final",
+      "period_name": "3rd",
+      "home_lineup_card": "/game-lineups/whl/1009080/S.C_2012-10-19.pdf",
+      "visiting_lineup_card": "/game-lineups/whl/1009080/SAS_2012-10-19.pdf",
+      "game_lineups": "/game-lineups/whl/1009080/SAS@S.C_2012-10-19.pdf",
+      "updated": {
+        "clock": 0,
+        "meta": 0,
+        "lineup": 0,
+        "goals": 0,
+        "penalties": 0,
+        "penaltyshots": 0,
+        "shots": 0,
+        "hits": 0,
+        "faceoffs": 0,
+        "pxp": 0,
+        "shootouts": 0,
+        "h2h": 0,
+        "pxpverbose": 0
+      },
+      "scoring": {
+        "home": {
+          "1": "1",
+          "2": "0",
+          "3": "1"
+        },
+        "visiting": {
+          "1": "1",
+          "2": "0",
+          "3": "0"
+        }
+      },
+      "shots_on_goal": {
+        "home": {
+          "1": 9,
+          "2": 5,
+          "3": 14
+        },
+        "visiting": {
+          "1": 13,
+          "2": 16,
+          "3": 15
+        }
+      },
+      "power_play": {
+        "total": {
+          "home": "3",
+          "visiting": "4"
+        },
+        "goals": {
+          "home": "0",
+          "visiting": "0"
+        }
+      }
+    }
+  }
+}
+
+What we want the frontend to look like (so we can get the appropriate api and controllers setup)
+A WHL page, when you click on it, will load the upcoming games, and the predictions I have made (predicted winner and probabilities of each team winning.)
+I am also thinking that we will be able to view previous predictions and the game stats for each of the teams. Probably filter by all, or by each team. Each previous prediction will show what I predicted (and probabilities for the k-values), the actual winner, and the rolling average of stats.
+
