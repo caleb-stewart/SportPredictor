@@ -1,0 +1,759 @@
+# SportPredictor Frontend Implementation Plan
+
+## Technology Stack
+- **Frontend Framework**: Vue 3 (Composition API)
+- **Component Library**: PrimeVue (entire library)
+- **Build Tool**: Vite
+- **State Management**: Pinia (Composition API)
+- **HTTP Client**: Axios
+- **Routing**: Vue Router
+- **Styling**: PrimeVue + PrimeFlex utility classes
+
+---
+
+## Project Setup
+
+### Main Application Setup
+```javascript
+// main.js
+import { createApp } from 'vue'
+import PrimeVue from 'primevue/config'
+
+// PrimeVue Theme and Icons
+import 'primevue/resources/themes/aura-light-blue/theme.css'
+import 'primevue/resources/primevue.min.css'
+import 'primeicons/primeicons.css'
+
+// PrimeFlex for utility classes
+import 'primeflex/primeflex.css'
+
+import App from './App.vue'
+import router from './router'
+import { createPinia } from 'pinia'
+
+const app = createApp(App)
+app.use(createPinia())
+app.use(router)
+app.use(PrimeVue)
+app.mount('#app')
+```
+
+### Package.json Dependencies
+```json
+{
+  "dependencies": {
+    "vue": "^3.3.0",
+    "vue-router": "^4.2.0",
+    "pinia": "^2.1.0",
+    "axios": "^1.4.0",
+    "primevue": "^3.45.0",
+    "primeicons": "^6.0.1",
+    "primeflex": "^3.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.2.0",
+    "vite": "^4.4.0"
+  }
+}
+```
+
+---
+
+## Project Structure
+```
+src/
+├── components/
+│   ├── common/
+│   │   ├── NavigationBar.vue
+│   │   ├── LoadingSpinner.vue
+│   │   └── ErrorMessage.vue
+│   └── whl/
+│       ├── FeaturedGames.vue
+│       ├── GameCard.vue
+│       ├── PredictionCard.vue
+│       ├── AccuracyMetrics.vue
+│       ├── HistoricalPredictions.vue
+│       ├── TeamStatistics.vue
+│       └── TeamLogo.vue
+├── views/
+│   ├── HomePage.vue
+│   └── WHLPage.vue
+├── stores/
+│   └── whl.js
+├── services/
+│   └── api.js
+├── utils/
+│   └── teamUtils.js
+├── assets/
+│   └── logos/
+│       ├── spokane-chiefs.png
+│       ├── seattle-thunderbirds.png
+│       └── ... (all 22 team logos)
+└── router/
+    └── index.js
+```
+
+---
+
+## State Management with Pinia (Composition API)
+
+### WHL Store (`src/stores/whl.js`)
+```javascript
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import { whlAPI } from '@/services/api'
+
+export const useWHLStore = defineStore('whl', () => {
+  // State
+  const upcomingGames = ref([])
+  const historicalPredictions = ref([])
+  const accuracyData = ref([])
+  const loading = ref({
+    upcomingGames: false,
+    predictions: false,
+    accuracy: false
+  })
+  const error = ref(null)
+
+  const teams = ref([
+    'Spokane Chiefs', 'Seattle Thunderbirds', 'Portland Winterhawks',
+    'Everett Silvertips', 'Tri-City Americans', 'Kamloops Blazers',
+    'Kelowna Rockets', 'Prince George Cougars', 'Brandon Wheat Kings',
+    'Swift Current Broncos', 'Vancouver Giants', 'Victoria Royals',
+    'Medicine Hat Tigers', 'Edmonton Oil Kings', 'Moose Jaw Warriors',
+    'Regina Pats', 'Saskatoon Blades', 'Prince Albert Raiders',
+    'Calgary Hitmen', 'Lethbridge Hurricanes', 'Red Deer Rebels',
+    'Wenatchee Wild'
+  ])
+
+  // Getters
+  const upcomingGamesWithPredictions = computed(() => {
+    return upcomingGames.value.map(game => ({
+      ...game,
+      predictions: historicalPredictions.value
+        .filter(pred => pred.game_id === game.game_id)
+        .sort((a, b) => a.k_value - b.k_value)
+    }))
+  })
+
+  const accuracyByKValue = computed(() => {
+    return (kValue) => accuracyData.value.find(d => d.k_value === kValue)
+  })
+
+  const overallAccuracy = computed(() => {
+    if (accuracyData.value.length === 0) return 0
+    const total = accuracyData.value.reduce((sum, d) => sum + d.total_predictions, 0)
+    const correct = accuracyData.value.reduce((sum, d) => sum + d.correct_predictions, 0)
+    return total > 0 ? (correct / total * 100).toFixed(1) : 0
+  })
+
+  const totalPredictions = computed(() => {
+    return accuracyData.value.reduce((sum, d) => sum + d.total_predictions, 0)
+  })
+
+  const teamOptions = computed(() => {
+    return [
+      { label: 'All Teams', value: null },
+      ...teams.value.map(team => ({ label: team, value: team }))
+    ]
+  })
+
+  // Actions
+  const fetchUpcomingGames = async () => {
+    loading.value.upcomingGames = true
+    error.value = null
+    try {
+      const response = await whlAPI.getUpcomingGames()
+      upcomingGames.value = response.data
+    } catch (err) {
+      error.value = err.message
+      console.error('Error fetching upcoming games:', err)
+    } finally {
+      loading.value.upcomingGames = false
+    }
+  }
+
+  const fetchPredictions = async (filters = {}) => {
+    loading.value.predictions = true
+    error.value = null
+    try {
+      const response = await whlAPI.getPredictions(filters)
+      historicalPredictions.value = response.data
+    } catch (err) {
+      error.value = err.message
+      console.error('Error fetching predictions:', err)
+    } finally {
+      loading.value.predictions = false
+    }
+  }
+
+  const fetchAccuracyData = async () => {
+    loading.value.accuracy = true
+    error.value = null
+    try {
+      const response = await whlAPI.getAccuracy()
+      accuracyData.value = response.data
+    } catch (err) {
+      error.value = err.message
+      console.error('Error fetching accuracy data:', err)
+    } finally {
+      loading.value.accuracy = false
+    }
+  }
+
+  const initializeWHLData = async () => {
+    await Promise.all([
+      fetchUpcomingGames(),
+      fetchAccuracyData(),
+      fetchPredictions({ limit: 100 })
+    ])
+  }
+
+  return {
+    // State
+    upcomingGames,
+    historicalPredictions,
+    accuracyData,
+    teams,
+    loading,
+    error,
+    
+    // Getters
+    upcomingGamesWithPredictions,
+    accuracyByKValue,
+    overallAccuracy,
+    totalPredictions,
+    teamOptions,
+    
+    // Actions
+    fetchUpcomingGames,
+    fetchPredictions,
+    fetchAccuracyData,
+    initializeWHLData
+  }
+})
+```
+
+---
+
+## API Service Layer
+
+### API Service (`src/services/api.js`)
+```javascript
+import axios from 'axios'
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1'
+
+const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  timeout: 10000
+})
+
+// Request interceptor for logging
+apiClient.interceptors.request.use(
+  (config) => {
+    console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`)
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
+// Response interceptor for error handling
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    console.error('API Error:', error.response?.data || error.message)
+    return Promise.reject(error)
+  }
+)
+
+export const whlAPI = {
+  getUpcomingGames() {
+    return apiClient.get('/whl/upcoming_games')
+  },
+
+  getCompletedGames(params = {}) {
+    return apiClient.get('/whl/completed_games', { params })
+  },
+
+  getPredictions(params = {}) {
+    return apiClient.get('/whl/predictions', { params })
+  },
+
+  getAccuracy(params = {}) {
+    return apiClient.get('/whl/accuracy', { params })
+  },
+
+  getTeamStats(teamName) {
+    return apiClient.get(`/whl/team_stats/${encodeURIComponent(teamName)}`)
+  }
+}
+```
+
+---
+
+## Utility Functions
+
+### Team Utils (`src/utils/teamUtils.js`)
+```javascript
+export const TEAM_SLUGS = {
+  'Spokane Chiefs': 'spokane-chiefs',
+  'Seattle Thunderbirds': 'seattle-thunderbirds',
+  'Portland Winterhawks': 'portland-winterhawks',
+  'Everett Silvertips': 'everett-silvertips',
+  'Tri-City Americans': 'tri-city-americans',
+  'Kamloops Blazers': 'kamloops-blazers',
+  'Kelowna Rockets': 'kelowna-rockets',
+  'Prince George Cougars': 'prince-george-cougars',
+  'Brandon Wheat Kings': 'brandon-wheat-kings',
+  'Swift Current Broncos': 'swift-current-broncos',
+  'Vancouver Giants': 'vancouver-giants',
+  'Victoria Royals': 'victoria-royals',
+  'Medicine Hat Tigers': 'medicine-hat-tigers',
+  'Edmonton Oil Kings': 'edmonton-oil-kings',
+  'Moose Jaw Warriors': 'moose-jaw-warriors',
+  'Regina Pats': 'regina-pats',
+  'Saskatoon Blades': 'saskatoon-blades',
+  'Prince Albert Raiders': 'prince-albert-raiders',
+  'Calgary Hitmen': 'calgary-hitmen',
+  'Lethbridge Hurricanes': 'lethbridge-hurricanes',
+  'Red Deer Rebels': 'red-deer-rebels',
+  'Wenatchee Wild': 'wenatchee-wild'
+}
+
+export function getTeamLogo(teamName) {
+  const slug = TEAM_SLUGS[teamName]
+  return slug ? `/src/assets/logos/${slug}.png` : '/src/assets/logos/default.png'
+}
+
+export function formatGameDate(isoString) {
+  return new Date(isoString).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric'
+  })
+}
+
+export function formatGameTime(isoString) {
+  return new Date(isoString).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}
+```
+
+---
+
+## Core Components
+
+### HomePage.vue
+```vue
+<template>
+  <div class="home-page">
+    <Menubar :model="menuItems" />
+    
+    <div class="p-4">
+      <Panel header="SportPredictor" class="mb-4">
+        <p class="text-lg">AI-powered sports predictions and analysis</p>
+      </Panel>
+      
+      <div class="grid">
+        <div class="col-12 md:col-6 lg:col-4">
+          <Card class="sport-card cursor-pointer" @click="navigateToWHL">
+            <template #header>
+              <div class="p-4 text-center">
+                <i class="pi pi-chart-line text-6xl text-primary"></i>
+              </div>
+            </template>
+            <template #title>Western Hockey League</template>
+            <template #content>
+              <p>Predict WHL game outcomes with AI-powered analysis of team statistics and performance trends.</p>
+              <div class="mt-3">
+                <Tag severity="success" value="Available" />
+              </div>
+            </template>
+          </Card>
+        </div>
+        
+        <div class="col-12 md:col-6 lg:col-4">
+          <Card class="sport-card sport-card-disabled">
+            <template #header>
+              <div class="p-4 text-center">
+                <i class="pi pi-clock text-6xl text-500"></i>
+              </div>
+            </template>
+            <template #title>More Sports Coming Soon</template>
+            <template #content>
+              <p>We're working on adding more sports leagues and prediction models.</p>
+              <div class="mt-3">
+                <Tag severity="info" value="Coming Soon" />
+              </div>
+            </template>
+          </Card>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+
+const menuItems = ref([
+  {
+    label: 'Home',
+    icon: 'pi pi-home',
+    command: () => router.push('/')
+  },
+  {
+    label: 'WHL',
+    icon: 'pi pi-chart-line',
+    command: () => router.push('/whl')
+  }
+])
+
+const navigateToWHL = () => {
+  router.push('/whl')
+}
+</script>
+
+<style scoped>
+.sport-card {
+  transition: transform 0.2s ease-in-out;
+  height: 100%;
+}
+
+.sport-card:hover:not(.sport-card-disabled) {
+  transform: translateY(-2px);
+}
+
+.sport-card-disabled {
+  opacity: 0.6;
+  cursor: not-allowed !important;
+}
+</style>
+```
+
+### WHLPage.vue
+```vue
+<template>
+  <div class="whl-page min-h-screen surface-50">
+    <Menubar :model="menuItems" />
+    
+    <!-- Loading State -->
+    <div v-if="whlStore.loading.accuracy" class="p-4">
+      <Card>
+        <template #content>
+          <div class="flex justify-content-center align-items-center" style="min-height: 200px;">
+            <ProgressBar mode="indeterminate" style="height: 6px; width: 300px;" />
+          </div>
+        </template>
+      </Card>
+    </div>
+    
+    <!-- Main Content -->
+    <div v-else class="p-4">
+      <!-- Page Header with Overall Stats -->
+      <Panel header="Western Hockey League Predictions" class="mb-4">
+        <AccuracyMetrics />
+      </Panel>
+      
+      <!-- Error Message -->
+      <Message v-if="whlStore.error" severity="error" class="mb-4">
+        {{ whlStore.error }}
+      </Message>
+      
+      <!-- Tabbed Interface -->
+      <TabView>
+        <TabPanel header="Featured" :leftIcon="'pi pi-star'">
+          <FeaturedGames />
+        </TabPanel>
+        
+        <TabPanel header="Historical Predictions" :leftIcon="'pi pi-history'">
+          <HistoricalPredictions />
+        </TabPanel>
+        
+        <TabPanel header="Team Statistics" :leftIcon="'pi pi-chart-bar'">
+          <TeamStatistics />
+        </TabPanel>
+      </TabView>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useWHLStore } from '@/stores/whl'
+import AccuracyMetrics from '@/components/whl/AccuracyMetrics.vue'
+import FeaturedGames from '@/components/whl/FeaturedGames.vue'
+import HistoricalPredictions from '@/components/whl/HistoricalPredictions.vue'
+import TeamStatistics from '@/components/whl/TeamStatistics.vue'
+
+const router = useRouter()
+const whlStore = useWHLStore()
+
+const menuItems = ref([
+  {
+    label: 'Home',
+    icon: 'pi pi-home',
+    command: () => router.push('/')
+  },
+  {
+    label: 'WHL',
+    icon: 'pi pi-chart-line',
+    command: () => router.push('/whl')
+  }
+])
+
+onMounted(async () => {
+  await whlStore.initializeWHLData()
+})
+</script>
+```
+
+### AccuracyMetrics.vue
+```vue
+<template>
+  <div class="accuracy-metrics">
+    <div class="grid">
+      <div class="col-12 md:col-3" v-for="kValue in [5, 10, 15]" :key="kValue">
+        <Card>
+          <template #title>{{ kValue }}-Game Model</template>
+          <template #content>
+            <div class="text-center">
+              <div class="text-4xl font-bold mb-2" :style="{ color: getAccuracyColor(getAccuracy(kValue)) }">
+                {{ getAccuracy(kValue) }}%
+              </div>
+              <ProgressBar 
+                :value="getAccuracy(kValue)" 
+                :showValue="false"
+                class="mt-2"
+                :class="getProgressBarClass(getAccuracy(kValue))"
+              />
+            </div>
+          </template>
+        </Card>
+      </div>
+      <div class="col-12 md:col-3">
+        <Card>
+          <template #title>Total Predictions</template>
+          <template #content>
+            <div class="text-center">
+              <div class="text-4xl font-bold mb-2">{{ whlStore.totalPredictions }}</div>
+              <Badge value="All Time" severity="info" />
+            </div>
+          </template>
+        </Card>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { useWHLStore } from '@/stores/whl'
+
+const whlStore = useWHLStore()
+
+const getAccuracy = (kValue) => {
+  const data = whlStore.accuracyByKValue(kValue)
+  return data?.accuracy_percentage || 0
+}
+
+const getAccuracyColor = (accuracy) => {
+  if (accuracy >= 60) return 'var(--green-500)'
+  if (accuracy >= 50) return 'var(--yellow-500)'
+  return 'var(--red-500)'
+}
+
+const getProgressBarClass = (accuracy) => {
+  if (accuracy >= 60) return 'progress-success'
+  if (accuracy >= 50) return 'progress-warning'
+  return 'progress-danger'
+}
+</script>
+```
+
+### GameCard.vue
+```vue
+<template>
+  <div class="game-card">
+    <Card>
+      <template #title>
+        <div class="game-header flex justify-content-between align-items-center">
+          <span class="text-sm">{{ formatGameDate(game.game_date_iso_8601) }}</span>
+          <span class="text-sm">{{ formatGameTime(game.game_date_iso_8601) }}</span>
+        </div>
+      </template>
+      
+      <template #content>
+        <div class="team-matchup flex justify-content-between align-items-center mb-4">
+          <div class="team flex flex-column align-items-center">
+            <TeamLogo :team="game.away_team" size="medium" class="mb-2" />
+            <span class="font-semibold text-center">{{ game.away_team }}</span>
+          </div>
+          
+          <div class="vs-separator text-2xl font-bold text-500">@</div>
+          
+          <div class="team flex flex-column align-items-center">
+            <TeamLogo :team="game.home_team" size="medium" class="mb-2" />
+            <span class="font-semibold text-center">{{ game.home_team }}</span>
+          </div>
+        </div>
+        
+        <div v-if="showPredictions && predictions?.length" class="predictions-section">
+          <Divider align="center">
+            <span class="font-semibold">Predictions</span>
+          </Divider>
+          
+          <TabView>
+            <TabPanel 
+              v-for="pred in predictions" 
+              :key="pred.k_value"
+              :header="`${pred.k_value} Games`"
+            >
+              <PredictionCard :prediction="pred" />
+            </TabPanel>
+          </TabView>
+        </div>
+      </template>
+    </Card>
+  </div>
+</template>
+
+<script setup>
+import { formatGameDate, formatGameTime } from '@/utils/teamUtils'
+import TeamLogo from './TeamLogo.vue'
+import PredictionCard from './PredictionCard.vue'
+
+defineProps({
+  game: {
+    type: Object,
+    required: true
+  },
+  predictions: {
+    type: Array,
+    default: () => []
+  },
+  showPredictions: {
+    type: Boolean,
+    default: false
+  }
+})
+</script>
+```
+
+### TeamLogo.vue
+```vue
+<template>
+  <Image 
+    :src="logoSrc" 
+    :alt="`${team} logo`"
+    :class="['team-logo', `size-${size}`]"
+    :width="logoSize"
+    :height="logoSize"
+    @error="handleImageError"
+    preview
+  />
+</template>
+
+<script setup>
+import { computed } from 'vue'
+import { getTeamLogo } from '@/utils/teamUtils'
+
+const props = defineProps({
+  team: {
+    type: String,
+    required: true
+  },
+  size: {
+    type: String,
+    default: 'medium',
+    validator: (value) => ['small', 'medium', 'large'].includes(value)
+  }
+})
+
+const logoSrc = computed(() => getTeamLogo(props.team))
+
+const logoSize = computed(() => {
+  const sizes = { small: '24', medium: '48', large: '72' }
+  return sizes[props.size]
+})
+
+const handleImageError = (event) => {
+  event.target.src = '/src/assets/logos/default.png'
+}
+</script>
+
+<style scoped>
+.team-logo {
+  border-radius: 4px;
+  object-fit: contain;
+}
+</style>
+```
+
+---
+
+## Environment Configuration
+
+### Vite Configuration (`vite.config.js`)
+```javascript
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import { resolve } from 'path'
+
+export default defineConfig({
+  plugins: [vue()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src'),
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['vue', 'vue-router', 'pinia', 'axios'],
+          primevue: ['primevue/config']
+        }
+      }
+    }
+  }
+})
+```
+
+### Environment Variables
+```env
+# .env.development
+VITE_API_URL=http://localhost:3000/api/v1
+VITE_APP_ENV=development
+
+# .env.production
+VITE_API_URL=https://api.sportpredictor.com/api/v1
+VITE_APP_ENV=production
+```
+
+---
+
+## Implementation Steps
+
+1. **Setup Project Structure**: Create Vue 3 project with Vite
+2. **Install Dependencies**: Add PrimeVue, Pinia, Axios, Vue Router
+3. **Configure Main Application**: Setup PrimeVue globally in main.js
+4. **Create Store**: Implement WHL store with composition API
+5. **Build API Service**: Setup Axios with interceptors
+6. **Create Core Components**: HomePage, WHLPage, and basic layout
+7. **Implement Feature Components**: GameCard, AccuracyMetrics, etc.
+8. **Add Team Assets**: Include team logos and utility functions
+9. **Test and Optimize**: Performance testing and error handling
+
+This streamlined approach uses PrimeVue's full component library without custom CSS overrides, and implements Pinia with the composition API for better consistency with Vue 3's modern patterns.
