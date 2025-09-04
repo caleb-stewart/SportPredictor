@@ -4,6 +4,8 @@
 
 SportPredictor is a Rails API application that predicts Western Hockey League (WHL) game outcomes using historical team statistics. The system fetches game data from external APIs, calculates rolling averages, makes predictions using machine learning models, and tracks prediction accuracy over time.
 
+**Important Note**: This application uses a centralized `whl_teams` table that serves as the master reference for all WHL teams. This table stores both the database ID (primary key) and the HockeyTech API ID for each team, and all other database tables reference teams through foreign keys to this central table rather than storing team names as strings. This ensures data integrity, improves query performance, and maintains proper database normalization.
+
 ### Main Goals
 1. **Data Collection**: Fetch and store 2000+ historical games per team from WHL APIs
 2. **Real-time Updates**: Daily fetch upcoming games and completed game results
@@ -40,10 +42,25 @@ SportPredictor is a Rails API application that predicts Western Hockey League (W
 
 **New Tables**:
 ```ruby
+# WhlTeams - Central reference table for all teams
+create_table :whl_teams do |t|
+  t.string :name, null: false # e.g., 'Spokane Chiefs'
+  t.string :hockeytech_id, null: false # e.g., '215'
+  t.string :city # e.g., 'Spokane'
+  t.string :team_name # e.g., 'Chiefs'
+  t.string :conference # 'Western' or 'Eastern'
+  t.string :division # e.g., 'U.S. Division', 'B.C. Division', etc.
+  t.boolean :active, default: true
+  t.timestamps
+  
+  t.index :hockeytech_id, unique: true
+  t.index :name, unique: true
+end
+
 # WhlRollingAverages
 create_table :whl_rolling_averages do |t|
   t.string :game_id, null: false
-  t.integer :team_id, null: false
+  t.references :whl_team, null: false, foreign_key: true
   t.integer :k_value, null: false # 5, 10, or 15
   t.decimal :goals_for_avg, precision: 8, scale: 2
   t.decimal :goals_against_avg, precision: 8, scale: 2
@@ -55,19 +72,19 @@ create_table :whl_rolling_averages do |t|
   t.timestamps
   
   t.index [:game_id, :k_value], unique: true
-  t.index [:team_id, :k_value]
+  t.index [:whl_team_id, :k_value]
 end
 
 # WhlPredictionRecords
 create_table :whl_prediction_records do |t|
   t.string :game_id, null: false
   t.integer :k_value, null: false # 5, 10, or 15
-  t.string :home_team, null: false
-  t.string :away_team, null: false
-  t.string :predicted_winner
+  t.references :home_team, null: false, foreign_key: { to_table: :whl_teams }
+  t.references :away_team, null: false, foreign_key: { to_table: :whl_teams }
+  t.references :predicted_winner, null: true, foreign_key: { to_table: :whl_teams }
   t.decimal :home_team_probability, precision: 5, scale: 4
   t.decimal :away_team_probability, precision: 5, scale: 4
-  t.string :actual_winner
+  t.references :actual_winner, null: true, foreign_key: { to_table: :whl_teams }
   t.boolean :correct, default: nil # null until game is complete
   t.datetime :prediction_date
   t.timestamps
@@ -83,6 +100,42 @@ add_column :whl_team_stats, :completed, :boolean, default: false
 add_column :whl_team_stats, :season_id, :string
 add_column :whl_team_stats, :season_name, :string
 add_column :whl_team_stats, :game_date_iso_8601, :datetime
+
+# Add foreign key relationships to WhlTeams table
+add_reference :whl_team_stats, :home_team, foreign_key: { to_table: :whl_teams }
+add_reference :whl_team_stats, :away_team, foreign_key: { to_table: :whl_teams }
+```
+
+### 1.3 WHL Teams Seed Data
+**Objective**: Populate the WHL teams reference table
+
+**Create**: `db/seeds/whl_teams.rb`
+
+```ruby
+WhlTeam.create!([
+  { name: 'Spokane Chiefs', hockeytech_id: '215', city: 'Spokane', team_name: 'Chiefs', conference: 'Western', division: 'U.S. Division' },
+  { name: 'Seattle Thunderbirds', hockeytech_id: '214', city: 'Seattle', team_name: 'Thunderbirds', conference: 'Western', division: 'U.S. Division' },
+  { name: 'Portland Winterhawks', hockeytech_id: '208', city: 'Portland', team_name: 'Winterhawks', conference: 'Western', division: 'U.S. Division' },
+  { name: 'Everett Silvertips', hockeytech_id: '226', city: 'Everett', team_name: 'Silvertips', conference: 'Western', division: 'U.S. Division' },
+  { name: 'Tri-City Americans', hockeytech_id: '217', city: 'Tri-City', team_name: 'Americans', conference: 'Western', division: 'U.S. Division' },
+  { name: 'Kamloops Blazers', hockeytech_id: '203', city: 'Kamloops', team_name: 'Blazers', conference: 'Western', division: 'B.C. Division' },
+  { name: 'Kelowna Rockets', hockeytech_id: '204', city: 'Kelowna', team_name: 'Rockets', conference: 'Western', division: 'B.C. Division' },
+  { name: 'Prince George Cougars', hockeytech_id: '210', city: 'Prince George', team_name: 'Cougars', conference: 'Western', division: 'B.C. Division' },
+  { name: 'Vancouver Giants', hockeytech_id: '223', city: 'Vancouver', team_name: 'Giants', conference: 'Western', division: 'B.C. Division' },
+  { name: 'Victoria Royals', hockeytech_id: '227', city: 'Victoria', team_name: 'Royals', conference: 'Western', division: 'B.C. Division' },
+  { name: 'Brandon Wheat Kings', hockeytech_id: '201', city: 'Brandon', team_name: 'Wheat Kings', conference: 'Eastern', division: 'East Division' },
+  { name: 'Swift Current Broncos', hockeytech_id: '216', city: 'Swift Current', team_name: 'Broncos', conference: 'Eastern', division: 'East Division' },
+  { name: 'Medicine Hat Tigers', hockeytech_id: '206', city: 'Medicine Hat', team_name: 'Tigers', conference: 'Eastern', division: 'East Division' },
+  { name: 'Edmonton Oil Kings', hockeytech_id: '228', city: 'Edmonton', team_name: 'Oil Kings', conference: 'Western', division: 'Central Division' },
+  { name: 'Moose Jaw Warriors', hockeytech_id: '207', city: 'Moose Jaw', team_name: 'Warriors', conference: 'Eastern', division: 'East Division' },
+  { name: 'Regina Pats', hockeytech_id: '212', city: 'Regina', team_name: 'Pats', conference: 'Eastern', division: 'East Division' },
+  { name: 'Saskatoon Blades', hockeytech_id: '213', city: 'Saskatoon', team_name: 'Blades', conference: 'Eastern', division: 'East Division' },
+  { name: 'Prince Albert Raiders', hockeytech_id: '209', city: 'Prince Albert', team_name: 'Raiders', conference: 'Eastern', division: 'East Division' },
+  { name: 'Calgary Hitmen', hockeytech_id: '202', city: 'Calgary', team_name: 'Hitmen', conference: 'Western', division: 'Central Division' },
+  { name: 'Lethbridge Hurricanes', hockeytech_id: '205', city: 'Lethbridge', team_name: 'Hurricanes', conference: 'Western', division: 'Central Division' },
+  { name: 'Red Deer Rebels', hockeytech_id: '211', city: 'Red Deer', team_name: 'Rebels', conference: 'Western', division: 'Central Division' },
+  { name: 'Wenatchee Wild', hockeytech_id: '222', city: 'Wenatchee', team_name: 'Wild', conference: 'Western', division: 'U.S. Division' }
+])
 ```
 
 ---
@@ -100,33 +153,13 @@ add_column :whl_team_stats, :game_date_iso_8601, :datetime
 - Batch process game IDs to avoid duplicate fetches
 - Robust error handling and logging
 - Progress tracking
+- Use WHL teams table to map between team names and HockeyTech API IDs
 
-**Team ID Mapping**:
+**Team ID Mapping** (Now references WhlTeam records):
 ```ruby
-TEAM_IDS = {
-  'Spokane Chiefs' => '215',
-  'Seattle Thunderbirds' => '214',
-  'Portland Winterhawks' => '208',
-  'Everett Silvertips' => '226',
-  'Tri-City Americans' => '217',
-  'Kamloops Blazers' => '203',
-  'Kelowna Rockets' => '204',
-  'Prince George Cougars' => '210',
-  'Brandon Wheat Kings' => '201',
-  'Swift Current Broncos' => '216',
-  'Vancouver Giants' => '223',
-  'Victoria Royals' => '227',
-  'Medicine Hat Tigers' => '206',
-  'Edmonton Oil Kings' => '228',
-  'Moose Jaw Warriors' => '207',
-  'Regina Pats' => '212',
-  'Saskatoon Blades' => '213',
-  'Prince Albert Raiders' => '209',
-  'Calgary Hitmen' => '202',
-  'Lethbridge Hurricanes' => '205',
-  'Red Deer Rebels' => '211',
-  'Wenatchee Wild' => '222'
-}.freeze
+# Use WhlTeam.find_by(name: 'Team Name').hockeytech_id
+# or WhlTeam.find_by(hockeytech_id: '215').name
+# This replaces the static hash with dynamic database lookups
 ```
 
 ### 2.2 Create Rake Task for Data Population
@@ -136,10 +169,11 @@ TEAM_IDS = {
 
 **Features**:
 - Fetch games in batches (1000 at a time using `numberofdaysback`)
-- Process game stats with random delays (1-5 seconds between requests)
+- Process game stats with random delays (1-3 seconds between requests)
 - Skip already processed games
 - Comprehensive logging
 - Resume capability if interrupted
+- Use WHL teams table for all team references
 
 ---
 
@@ -155,6 +189,7 @@ TEAM_IDS = {
 - Store averages for each game_id representing stats up to that point
 - Update averages when new games are added
 - Efficient calculation using sliding window approach
+- Reference teams through WHL teams table foreign keys
 
 ### 3.2 Rolling Averages Population Task
 **Create**: `lib/tasks/calculate_rolling_averages.rake`
@@ -184,7 +219,8 @@ TEAM_IDS = {
 **Features**:
 - Fetch upcoming games (`numberofdaysahead=1`)
 - Create WhlTeamStats records with `completed: false`
-- Store: game_id, home_team, away_team, game_date_iso_8601, season_id, season_name
+- Store: game_id, home_team_id, away_team_id, game_date_iso_8601, season_id, season_name
+- Use WHL teams table to resolve team references
 - Trigger prediction generation for fetched games
 
 ### 4.3 Daily Completed Games Job
@@ -206,7 +242,7 @@ TEAM_IDS = {
 - Generate predictions for upcoming games
 - Use rolling averages (k=5, 10, 15) as input features
 - Call external ML API for predictions
-- Store results in WhlPredictionRecords
+- Store results in WhlPredictionRecords with proper team foreign key references
 - Handle API errors gracefully
 
 ---
@@ -221,23 +257,27 @@ TEAM_IDS = {
 # GET /api/v1/whl/upcoming_games
 def upcoming_games
   # Return upcoming games with predictions
+  # Include team information from WHL teams table
 end
 
 # GET /api/v1/whl/completed_games
 def completed_games
   # Return completed games with stats and prediction accuracy
   # Support filtering by team, date range
+  # Use WHL teams table for team information
 end
 
 # GET /api/v1/whl/predictions
 def predictions
   # Return prediction history with accuracy metrics
   # Support filtering by team, k_value, date range
+  # Join with WHL teams table for team details
 end
 
 # GET /api/v1/whl/team_stats/:team_name
 def team_stats
   # Return historical stats for specific team
+  # Look up team through WHL teams table
 end
 ```
 
@@ -262,22 +302,54 @@ end
 ## Phase 6: Data Models and Relationships
 
 ### 6.1 Model Enhancements
-**Update existing models and create new ones**:
+**Update existing models and create new ones with proper WHL teams table relationships**:
 
 ```ruby
+# app/models/whl_team.rb
+class WhlTeam < ApplicationRecord
+  has_many :home_games, class_name: 'WhlTeamStat', foreign_key: 'home_team_id'
+  has_many :away_games, class_name: 'WhlTeamStat', foreign_key: 'away_team_id'
+  has_many :whl_rolling_averages
+  has_many :home_predictions, class_name: 'WhlPredictionRecord', foreign_key: 'home_team_id'
+  has_many :away_predictions, class_name: 'WhlPredictionRecord', foreign_key: 'away_team_id'
+  has_many :predicted_wins, class_name: 'WhlPredictionRecord', foreign_key: 'predicted_winner_id'
+  has_many :actual_wins, class_name: 'WhlPredictionRecord', foreign_key: 'actual_winner_id'
+  
+  validates :name, :hockeytech_id, presence: true, uniqueness: true
+  validates :conference, inclusion: { in: ['Western', 'Eastern'] }
+  
+  scope :active, -> { where(active: true) }
+  scope :by_conference, ->(conference) { where(conference: conference) }
+  scope :by_division, ->(division) { where(division: division) }
+  
+  def all_games
+    WhlTeamStat.where('home_team_id = ? OR away_team_id = ?', id, id)
+  end
+  
+  def display_name
+    "#{city} #{team_name}"
+  end
+end
+
 # app/models/whl_team_stat.rb
 class WhlTeamStat < ApplicationRecord
+  belongs_to :home_team, class_name: 'WhlTeam'
+  belongs_to :away_team, class_name: 'WhlTeam'
   has_many :whl_prediction_records, foreign_key: :game_id, primary_key: :game_id
   has_many :whl_rolling_averages, foreign_key: :game_id, primary_key: :game_id
   
   scope :completed, -> { where(completed: true) }
   scope :upcoming, -> { where(completed: false) }
-  scope :by_team, ->(team) { where("home_team = ? OR away_team = ?", team, team) }
+  scope :involving_team, ->(team) { where('home_team_id = ? OR away_team_id = ?', team.id, team.id) }
 end
 
 # app/models/whl_prediction_record.rb
 class WhlPredictionRecord < ApplicationRecord
   belongs_to :whl_team_stat, foreign_key: :game_id, primary_key: :game_id
+  belongs_to :home_team, class_name: 'WhlTeam'
+  belongs_to :away_team, class_name: 'WhlTeam'
+  belongs_to :predicted_winner, class_name: 'WhlTeam', optional: true
+  belongs_to :actual_winner, class_name: 'WhlTeam', optional: true
   
   validates :k_value, inclusion: { in: [5, 10, 15] }
   validates :home_team_probability, :away_team_probability, 
@@ -285,16 +357,18 @@ class WhlPredictionRecord < ApplicationRecord
   
   scope :by_k_value, ->(k) { where(k_value: k) }
   scope :correct_predictions, -> { where(correct: true) }
-  scope :by_team, ->(team) { where("home_team = ? OR away_team = ?", team, team) }
+  scope :involving_team, ->(team) { where('home_team_id = ? OR away_team_id = ?', team.id, team.id) }
 end
 
 # app/models/whl_rolling_average.rb
 class WhlRollingAverage < ApplicationRecord
+  belongs_to :whl_team
+  
   validates :k_value, inclusion: { in: [5, 10, 15] }
-  validates :game_id, :team_id, presence: true
+  validates :game_id, presence: true
   
   scope :by_k_value, ->(k) { where(k_value: k) }
-  scope :by_team, ->(team_id) { where(team_id: team_id) }
+  scope :by_team, ->(team) { where(whl_team: team) }
 end
 ```
 
@@ -321,10 +395,40 @@ end
 
 ## Implementation Priority Order
 
-1. **Phase 1**: Database migration and schema updates (Critical)
+1. **Phase 1**: Database migration and schema updates (Critical - includes WHL teams table setup)
 2. **Phase 2**: Historical data collection service and rake tasks
 3. **Phase 3**: Rolling averages calculation
 4. **Phase 6**: Model relationships and validations
 5. **Phase 4**: Daily job processing
 6. **Phase 5**: API controllers and routes
 7. **Phase 7**: Error handling and monitoring
+
+---
+
+## Frontend Requirements Summary
+
+Based on your requirements, the frontend should display:
+
+### WHL Page Features
+1. **Upcoming Games Section**:
+   - List of upcoming games (next day)
+   - Team matchups (home vs away) - displayed using team information from WHL teams table
+   - Prediction results for each k-value (5, 10, 15)
+   - Win probabilities for each team
+   - Game date/time
+
+2. **Historical Predictions Section**:
+   - Filter by team or show all - team filtering uses WHL teams table
+   - Filter by k-value
+   - Show predicted winner vs actual winner
+   - Display prediction accuracy percentage
+   - Rolling average stats used for predictions
+
+3. **Team Statistics Section**:
+   - Individual team performance over time - organized by WHL teams table structure
+   - Historical game results
+   - Rolling average trends
+   - Season-over-season comparisons
+   - Team information (conference, division) from WHL teams table
+
+This structured approach breaks down your complex requirements into manageable phases that can be implemented incrementally, with each phase building on the previous ones. The WHL teams table serves as the foundation for all team-related data relationships throughout the application.
