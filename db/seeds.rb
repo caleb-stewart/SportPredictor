@@ -7,3 +7,10 @@
 #   ["Action", "Comedy", "Drama", "Horror"].each do |genre_name|
 #     MovieGenre.find_or_create_by!(name: genre_name)
 #   end
+#
+# Load WHL teams seed data
+if defined?(WhlTeam)
+  require_relative 'seeds/whl_teams.rb'
+else
+  puts 'WhlTeam model not loaded. Make sure migration and model exist.'
+end

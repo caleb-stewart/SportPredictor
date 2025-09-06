@@ -1,0 +1,2 @@
+class WhlGame < ApplicationRecord
+end

@@ -1,0 +1,2 @@
+class WhlTeam < ApplicationRecord
+end
