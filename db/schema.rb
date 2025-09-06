@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_06_201000) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_06_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -37,6 +37,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_06_201000) do
     t.string "game_clock"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "game_number"
+    t.jsonb "scoring"
+    t.jsonb "power_play"
+    t.jsonb "fow"
     t.index ["away_team_id"], name: "index_whl_games_on_away_team_id"
     t.index ["game_id"], name: "index_whl_games_on_game_id", unique: true
     t.index ["home_team_id"], name: "index_whl_games_on_home_team_id"
