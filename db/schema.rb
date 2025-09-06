@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_06_210000) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_06_213343) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -21,26 +21,26 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_06_210000) do
     t.datetime "game_date_iso_8601"
     t.string "venue"
     t.string "status"
-    t.bigint "home_team_id", null: false
-    t.bigint "away_team_id", null: false
     t.integer "home_goal_count"
     t.integer "away_goal_count"
     t.jsonb "scoring_breakdown"
     t.jsonb "shots_on_goal"
-    t.integer "home_power_play_attempts"
-    t.integer "away_power_play_attempts"
-    t.integer "home_power_play_goals"
-    t.integer "away_power_play_goals"
-    t.integer "home_faceoffs_won"
-    t.integer "away_faceoffs_won"
     t.string "period"
-    t.string "game_clock"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.integer "game_number"
-    t.jsonb "scoring"
     t.jsonb "power_play"
     t.jsonb "fow"
+    t.decimal "home_power_play_percentage", precision: 8, scale: 4
+    t.decimal "away_power_play_percentage", precision: 8, scale: 4
+    t.decimal "home_faceoff_win_percentage", precision: 8, scale: 4
+    t.decimal "away_faceoff_win_percentage", precision: 8, scale: 4
+    t.integer "home_shots_on_goal_total"
+    t.integer "away_shots_on_goal_total"
+    t.string "home_team"
+    t.string "away_team"
+    t.integer "home_team_id"
+    t.integer "away_team_id"
     t.index ["away_team_id"], name: "index_whl_games_on_away_team_id"
     t.index ["game_id"], name: "index_whl_games_on_game_id", unique: true
     t.index ["home_team_id"], name: "index_whl_games_on_home_team_id"
@@ -109,7 +109,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_06_210000) do
 
   create_table "whl_teams", force: :cascade do |t|
     t.string "name", null: false
-    t.string "hockeytech_id", null: false
+    t.integer "hockeytech_id", null: false
     t.string "city"
     t.string "team_name"
     t.string "conference"
@@ -121,8 +121,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_06_210000) do
     t.index ["name"], name: "index_whl_teams_on_name", unique: true
   end
 
-  add_foreign_key "whl_games", "whl_teams", column: "away_team_id"
-  add_foreign_key "whl_games", "whl_teams", column: "home_team_id"
+  add_foreign_key "whl_games", "whl_teams", column: "away_team_id", primary_key: "hockeytech_id"
+  add_foreign_key "whl_games", "whl_teams", column: "home_team_id", primary_key: "hockeytech_id"
   add_foreign_key "whl_prediction_records", "whl_teams", column: "actual_winner_id"
   add_foreign_key "whl_prediction_records", "whl_teams", column: "away_team_id"
   add_foreign_key "whl_prediction_records", "whl_teams", column: "home_team_id"

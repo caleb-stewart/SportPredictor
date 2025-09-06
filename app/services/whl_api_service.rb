@@ -6,7 +6,7 @@ class WhlApiService
 
   def initialize
     # Secret key, that is actually public from the WHL site
-    @key = ENV["LSCLUSTER_API_KEY"]
+    @key = ENV["HOCKEYTECH_API"]
 
     # Parameters always used in the URL
     @default_params = {
