@@ -96,5 +96,6 @@ tmp:screenshots:clear
 tmp:sockets:clear
 tmp:storage:clear
 whl_data:import
+whl_rolling_averages:calculate
 yarn:install
 zeitwerk:check

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_06_220000) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_07_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -75,42 +75,19 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_06_220000) do
     t.decimal "goals_against_avg", precision: 8, scale: 2
     t.decimal "shots_for_avg", precision: 8, scale: 2
     t.decimal "shots_against_avg", precision: 8, scale: 2
-    t.decimal "power_play_percentage_avg", precision: 8, scale: 2
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
+    t.decimal "power_play_percentage_avg", precision: 8, scale: 4
+    t.decimal "power_play_percentage_against_avg", precision: 8, scale: 4
+    t.decimal "faceoff_win_percentage_avg", precision: 8, scale: 4
+    t.decimal "faceoff_win_percentage_against_avg", precision: 8, scale: 4
+    t.integer "home_away"
     t.decimal "goals_diff", precision: 8, scale: 2
     t.decimal "ppp_diff", precision: 8, scale: 4
     t.decimal "sog_diff", precision: 8, scale: 2
     t.decimal "fowp_diff", precision: 8, scale: 4
-    t.decimal "target_fowp", precision: 8, scale: 4
-    t.decimal "opponent_fowp", precision: 8, scale: 4
-    t.integer "home_away"
-    t.index ["game_id", "k_value"], name: "index_whl_rolling_averages_on_game_id_and_k_value", unique: true
-    t.index ["whl_team_id", "k_value"], name: "index_whl_rolling_averages_on_whl_team_id_and_k_value"
-    t.index ["whl_team_id"], name: "index_whl_rolling_averages_on_whl_team_id"
-  end
-
-  create_table "whl_team_stats", force: :cascade do |t|
-    t.string "game_id", null: false
-    t.bigint "home_team_id", null: false
-    t.bigint "away_team_id", null: false
-    t.boolean "completed", default: false
-    t.string "season_id"
-    t.string "season_name"
-    t.datetime "game_date_iso_8601"
-    t.integer "home_goals"
-    t.integer "away_goals"
-    t.integer "home_shots"
-    t.integer "away_shots"
-    t.decimal "home_power_play_percentage", precision: 8, scale: 2
-    t.decimal "away_power_play_percentage", precision: 8, scale: 2
-    t.decimal "home_penalty_kill_percentage", precision: 8, scale: 2
-    t.decimal "away_penalty_kill_percentage", precision: 8, scale: 2
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["away_team_id"], name: "index_whl_team_stats_on_away_team_id"
-    t.index ["game_id"], name: "index_whl_team_stats_on_game_id", unique: true
-    t.index ["home_team_id"], name: "index_whl_team_stats_on_home_team_id"
+    t.index ["game_id", "k_value", "whl_team_id"], name: "index_whl_rolling_averages_on_game_id_k_value_whl_team_id", unique: true
+    t.index ["whl_team_id"], name: "index_whl_rolling_averages_on_whl_team_id"
   end
 
   create_table "whl_teams", force: :cascade do |t|
@@ -134,6 +111,4 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_06_220000) do
   add_foreign_key "whl_prediction_records", "whl_teams", column: "home_team_id"
   add_foreign_key "whl_prediction_records", "whl_teams", column: "predicted_winner_id"
   add_foreign_key "whl_rolling_averages", "whl_teams"
-  add_foreign_key "whl_team_stats", "whl_teams", column: "away_team_id"
-  add_foreign_key "whl_team_stats", "whl_teams", column: "home_team_id"
 end
