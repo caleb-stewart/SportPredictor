@@ -17,8 +17,8 @@ namespace :predictor do
       # Get previous rolling averages for each team before this game
       home_team_avgs = WhlRollingAverage.where(whl_team_id: home_team.id)
         .joins("INNER JOIN whl_games ON whl_rolling_averages.game_id = whl_games.game_id")
-        .where("whl_games.game_date_iso_8601 < ?", game.game_date_iso_8601)
-        .order("whl_games.game_date_iso_8601 ASC")
+  .where("whl_games.game_date < ?", game.game_date)
+  .order("whl_games.game_date ASC")
         .limit(avg.k_value)
         .map { |ra| {
           target_goals: ra.goals_for_avg.to_f,
@@ -39,8 +39,8 @@ namespace :predictor do
 
       away_team_avgs = WhlRollingAverage.where(whl_team_id: away_team.id)
         .joins("INNER JOIN whl_games ON whl_rolling_averages.game_id = whl_games.game_id")
-        .where("whl_games.game_date_iso_8601 < ?", game.game_date_iso_8601)
-        .order("whl_games.game_date_iso_8601 ASC")
+  .where("whl_games.game_date < ?", game.game_date)
+  .order("whl_games.game_date ASC")
         .limit(avg.k_value)
         .map { |ra| {
           target_goals: ra.goals_for_avg.to_f,

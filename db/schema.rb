@@ -10,15 +10,15 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_07_040000) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_07_203000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
   create_table "whl_games", force: :cascade do |t|
-    t.string "game_id", null: false
+    t.integer "game_id", null: false
     t.string "season_id"
     t.string "season_name"
-    t.datetime "game_date_iso_8601"
+    t.date "game_date"
     t.string "venue"
     t.string "status"
     t.integer "home_goal_count"
@@ -47,7 +47,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_07_040000) do
   end
 
   create_table "whl_prediction_records", force: :cascade do |t|
-    t.string "game_id", null: false
+    t.integer "game_id", null: false
     t.integer "k_value", null: false
     t.bigint "home_team_id", null: false
     t.bigint "away_team_id", null: false
@@ -68,7 +68,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_07_040000) do
   end
 
   create_table "whl_rolling_averages", force: :cascade do |t|
-    t.string "game_id", null: false
+    t.integer "game_id", null: false
     t.bigint "whl_team_id", null: false
     t.integer "k_value", null: false
     t.decimal "goals_for_avg", precision: 8, scale: 2

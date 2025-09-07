@@ -60,11 +60,14 @@ namespace :whl_data do
           home_sog = clock.dig("shots_on_goal", "home")&.values&.map(&:to_i)&.sum || 0
           away_sog = clock.dig("shots_on_goal", "visiting")&.values&.map(&:to_i)&.sum || 0
 
+          # Assign game_date as a Ruby Date object from GameDateISO8601 (like update_game_dates_from_api.rake)
+          iso_date = clock["GameDateISO8601"] || game["GameDateISO8601"]
+          game_date = iso_date ? (Date.iso8601(iso_date) rescue nil) : nil
           WhlGame.create!(
             game_id: game_id,
             season_id: clock["season_id"] || game["SeasonID"],
             season_name: clock["season_name"] || game["SeasonName"],
-            game_date_iso_8601: clock["game_date_iso_8601"] || game["GameDateISO8601"],
+            game_date: game_date,
             venue: clock["venue"] || game["venue_name"],
             status: clock["status"] || game["GameStatusString"],
             home_team: home_team&.name || (game["HomeLongName"] || game["HomeTeamName"]),

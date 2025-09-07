@@ -7,7 +7,7 @@ namespace :whl_rolling_averages do
     ks = [ 5, 10, 15 ]
     WhlTeam.find_each do |team|
       logger.info "Processing team: #{team.name} (ID: #{team.id})"
-      games = WhlGame.where("home_team_id = ? OR away_team_id = ?", team.hockeytech_id, team.hockeytech_id).order(:game_date_iso_8601)
+  games = WhlGame.where("home_team_id = ? OR away_team_id = ?", team.hockeytech_id, team.hockeytech_id).order(:game_date)
       games.each_with_index do |game, idx|
         ks.each do |k|
           next if idx < k
