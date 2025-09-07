@@ -19,6 +19,15 @@ def train_team_model(team_data):
     It returns the trained model and the scaler used to standardize the features.
     '''
 
+    # Print out the value and type of each feature for debugging
+    print("--- Feature values and types for training ---")
+    for i, row in enumerate(team_data):
+        print(f"Row {i}:")
+        for feat in features + [target_col]:
+            val = row.get(feat)
+            print(f"  {feat}: {val} (type: {type(val)})")
+    print("--------------------------------------------")
+
     # create dataframe from the list of dictionaries
     # appends the dependency column to the features list
     df = pd.DataFrame(team_data, columns=features + [target_col])

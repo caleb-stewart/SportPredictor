@@ -43,6 +43,14 @@ namespace :whl_rolling_averages do
           ppp_diff = avg.call(target_stats[:ppp]) - avg.call(opponent_stats[:ppp])
           sog_diff = avg.call(target_stats[:sog]) - avg.call(opponent_stats[:sog])
           fowp_diff = avg.call(target_stats[:fowp]) - avg.call(opponent_stats[:fowp])
+          # Determine if the team won this game
+          is_home = game.home_team_id == team.hockeytech_id
+          team_goals = is_home ? game.home_goal_count : game.away_goal_count
+          opp_goals = is_home ? game.away_goal_count : game.home_goal_count
+          target_win = nil
+          if !team_goals.nil? && !opp_goals.nil?
+            target_win = team_goals > opp_goals ? 1 : 0
+          end
           WhlRollingAverage.create!(
             game_id: game.game_id,
             whl_team_id: team.id,
@@ -55,11 +63,12 @@ namespace :whl_rolling_averages do
             power_play_percentage_against_avg: avg.call(opponent_stats[:ppp]),
             faceoff_win_percentage_avg: avg.call(target_stats[:fowp]),
             faceoff_win_percentage_against_avg: avg.call(opponent_stats[:fowp]),
-            home_away: game.home_team_id == team.hockeytech_id ? 1 : 0,
+            home_away: is_home ? 1 : 0,
             goals_diff: goals_diff,
             ppp_diff: ppp_diff,
             sog_diff: sog_diff,
-            fowp_diff: fowp_diff
+            fowp_diff: fowp_diff,
+            target_win: target_win
           )
         end
       end

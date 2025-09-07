@@ -86,6 +86,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_07_040000) do
     t.decimal "fowp_diff", precision: 8, scale: 4
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "target_win"
     t.index ["game_id", "k_value", "whl_team_id"], name: "index_whl_rolling_averages_on_game_id_k_value_whl_team_id", unique: true
     t.index ["whl_team_id"], name: "index_whl_rolling_averages_on_whl_team_id"
   end

@@ -56,6 +56,7 @@ default
 environment
 import:whl_stats
 log:clear
+predictor:run
 railties:install:migrations
 solid_cable:install
 solid_cable:update
