@@ -34,3 +34,8 @@
 */pf-venv
 
 *.sql
+__pycache__/
+*.pyc
+
+PredictorFlask/model_store/*
+!PredictorFlask/model_store/.keep

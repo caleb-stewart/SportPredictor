@@ -1,16 +1,25 @@
 class MlChlService
   include HTTParty
-  base_uri("http://localhost:2718")
+  base_uri(ENV.fetch("PREDICTOR_FLASK_URL", "http://localhost:2718"))
 
   def self.calc_and_get_prediction(payload)
-    # Get the results of prediction ML calculation
-    predict_probs = self.post("/whl/calc_winner", body: payload.to_json, headers: { "Content-Type" => "application/json" })
+    response = self.post(
+      "/whl/calc_winner",
+      body: payload.to_json,
+      headers: { "Content-Type" => "application/json" }
+    )
 
-    # Have home_team be first, before the away_team
-    ordered = ActiveSupport::OrderedHash.new
-    ordered["home_team_prob"] = predict_probs["home_team_prob"]
-    ordered["away_team_prob"] = predict_probs["away_team_prob"]
+    unless response.success?
+      raise StandardError, "PredictorFlask request failed with #{response.code}: #{response.body}"
+    end
 
-    ordered
+    {
+      "home_team_prob" => response["home_team_prob"]&.to_f,
+      "away_team_prob" => response["away_team_prob"]&.to_f,
+      "predicted_winner_id" => response["predicted_winner_id"],
+      "model_version" => response["model_version"],
+      "model_family" => response["model_family"],
+      "k_components" => response["k_components"] || {}
+    }
   end
 end

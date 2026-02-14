@@ -51,10 +51,13 @@ namespace :whl_rolling_averages do
           if !team_goals.nil? && !opp_goals.nil?
             target_win = team_goals > opp_goals ? 1 : 0
           end
-          WhlRollingAverage.create!(
+          rolling_avg = WhlRollingAverage.find_or_initialize_by(
             game_id: game.game_id,
             whl_team_id: team.id,
-            k_value: k,
+            k_value: k
+          )
+
+          rolling_avg.update!(
             goals_for_avg: avg.call(target_stats[:goals]),
             goals_against_avg: avg.call(opponent_stats[:goals]),
             shots_for_avg: avg.call(target_stats[:sog]),

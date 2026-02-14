@@ -1,10 +1,10 @@
-# production:
-#   periodic_cleanup:
-#     class: CleanSoftDeletedRecordsJob
-#     queue: background
-#     args: [ 1000, { batch_size: 500 } ]
-#     schedule: every hour
-#   periodic_command:
-#     command: "SoftDeletedRecord.due.delete_all"
-#     priority: 2
-#     schedule: at 5am every day
+production:
+  whl_daily_data_update:
+    class: WhlDailyUpdateJob
+    queue: default
+    schedule: at 9:00am every day
+
+  whl_daily_model_refresh:
+    class: WhlDailyModelRefreshJob
+    queue: default
+    schedule: at 9:30am every day

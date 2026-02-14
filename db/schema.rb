@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_07_203000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_14_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -59,10 +59,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_07_203000) do
     t.datetime "prediction_date"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "model_version"
+    t.string "model_family"
+    t.jsonb "raw_model_outputs"
     t.index ["actual_winner_id"], name: "index_whl_prediction_records_on_actual_winner_id"
     t.index ["away_team_id"], name: "index_whl_prediction_records_on_away_team_id"
     t.index ["game_id", "k_value"], name: "index_whl_prediction_records_on_game_id_and_k_value", unique: true
     t.index ["home_team_id"], name: "index_whl_prediction_records_on_home_team_id"
+    t.index ["model_version"], name: "index_whl_prediction_records_on_model_version"
     t.index ["predicted_winner_id"], name: "index_whl_prediction_records_on_predicted_winner_id"
     t.index ["prediction_date"], name: "index_whl_prediction_records_on_prediction_date"
   end

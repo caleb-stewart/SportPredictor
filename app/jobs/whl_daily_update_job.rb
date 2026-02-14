@@ -1,105 +1,120 @@
 class WhlDailyUpdateJob < ApplicationJob
   queue_as :default
 
-  # Updates the WHL team stats in the database with the last games played
-  # Run this daily
-  def perform(*args)
-    puts "RUNNING WHL DAILY PREDICTION JOB"
+  # Fetches yesterday's finished games and updates whl_games + prediction correctness.
+  def perform(*_args)
+    logger = Logger.new(STDOUT)
     whl_api_service = WhlApiService.new
 
-    # Get the list of games that were played yesterday
-    # We really only need this for the game_id, so we can get the full team stats
-    update_games = whl_api_service.game_id_url(num_of_days_ahead=0, num_of_past_games=1)
-    update_games = update_games["SiteKit"]["Scorebar"]
+    update_games = whl_api_service.game_id_url(0, 1)
+    update_games = update_games.dig("SiteKit", "Scorebar") || []
 
-    # Go through each game played yesterday
-    update_games.each do |game|
-      # Get the game_id from game played yesterday
-      game_id = game["ID"].to_i
+    update_games.each do |game_data|
+      game_id = game_data["ID"]&.to_i
+      next unless game_id
 
+      begin
+        stats_response = whl_api_service.get_game_stats_url(game_id)
+        stats_data = stats_response.parsed_response
+        clock = stats_data.dig("GC", "Clock") || {}
 
+        whl_game = upsert_game_from_clock(game_id: game_id, clock: clock, fallback_game: game_data)
+        next unless whl_game
 
-      # Fetch full game stats
-      # uses the game_id to get the full game stats
-      game_stats = whl_api_service.get_game_stats_url(game_id)
-
-      home_name = game_stats["GC"]["Clock"]["home_team"]["name"]
-      away_name = game_stats["GC"]["Clock"]["visiting_team"]["name"]
-      home_goals = game_stats["GC"]["Clock"]["home_goal_count"].to_i
-      away_goals = game_stats["GC"]["Clock"]["visiting_goal_count"].to_i
-
-      # Skip if game already exists in database
-      if WhlTeamStat.exists?(game_id: game_id)
-        puts "Game ID #{game_id} already exists in database. Skipping."
-        # Update the prediction records with the correct winner
-        update_prediction_records(game_id, home_goals, away_goals)
-        next
+        update_prediction_records(whl_game: whl_game, logger: logger)
+      rescue => e
+        logger.error "Daily update failed for game #{game_id}: #{e.message}"
       end
-
-      # Compute Power Play Percentage
-      home_pp_total = game_stats["GC"]["Clock"]["power_play"]["total"]["home"].to_f
-      # If there are no goals or no power plays, set goals to 0.0
-      # This is a workaround for the API returning nil for pp goals
-      home_pp_goals = game_stats["GC"]["Clock"]["power_play"]["goals"]["home"]&.to_f || 0.0
-      # if there are no power plays, set ppp to 0.0, else compute ppp
-      home_ppp = home_pp_total > 0 ? (home_pp_goals / home_pp_total) : 0.0
-
-      away_pp_total = game_stats["GC"]["Clock"]["power_play"]["total"]["visiting"].to_f
-      away_pp_goals = game_stats["GC"]["Clock"]["power_play"]["goals"]["visiting"]&.to_f || 0.0
-      away_ppp = away_pp_total > 0 ? (away_pp_goals / away_pp_total) : 0.0
-
-      # Compute Shots on Goal
-      home_sog = game_stats["GC"]["Clock"]["shots_on_goal"]["home"].values.map(&:to_i).sum
-      away_sog = game_stats["GC"]["Clock"]["shots_on_goal"]["visiting"].values.map(&:to_i).sum
-
-      # Compute Faceoff Win Percentage
-      home_fow = game_stats["GC"]["Clock"]["fow"]["home"].to_f
-      away_fow = game_stats["GC"]["Clock"]["fow"]["visiting"].to_f
-      fow_total = home_fow + away_fow
-
-      if fow_total > 0
-        home_fowp = home_fow / fow_total
-        away_fowp = away_fow / fow_total
-      else
-        home_fowp = 0.5
-        away_fowp = 0.5
-      end
-
-
-      WhlTeamStat.create!(
-        game_id: game_id,
-        home_name: home_name,
-        away_name: away_name,
-        home_goals: home_goals,
-        away_goals: away_goals,
-        home_ppp: home_ppp,
-        away_ppp: away_ppp,
-        home_sog: home_sog,
-        away_sog: away_sog,
-        home_fowp: home_fowp,
-        away_fowp: away_fowp
-      )
-
-      # Update the prediction records with the correct winner
-      update_prediction_records(game_id, home_goals, away_goals)
     end
 
     nil
   end
 
-  def update_prediction_records(game_id, home_goals, away_goals)
-    # Determine actual winner (1 = home win, 0 = away win, nil = tie or unknown)
-    actual_winner = home_goals > away_goals ? 1 : 0
+  private
 
-    # Fetch and update all predictions for this game
-    WhlPredictionRecord.where(game_id: game_id).find_each do |record|
-      puts "UPDATING PREDICTION RECORD: ", record.to_json
-      # predicted winner is the record with the greater prob
-      predicted_winner = record.home_prob > record.away_prob ? 1 : 0
-      # update if the predicted winner was the actual winner
+  def upsert_game_from_clock(game_id:, clock:, fallback_game:)
+    home_team_id = clock.dig("home_team", "team_id")&.to_i || fallback_game["HomeID"]&.to_i
+    away_team_id = clock.dig("visiting_team", "team_id")&.to_i || fallback_game["VisitorID"]&.to_i
 
-      puts "Predicted Winner: #{predicted_winner}, Actual Winner: #{actual_winner}"
-      record.update(correct: predicted_winner == actual_winner)
+    home_pp_attempts = clock.dig("power_play", "total", "home")&.to_f
+    away_pp_attempts = clock.dig("power_play", "total", "visiting")&.to_f
+    home_pp_goals = clock.dig("power_play", "goals", "home")&.to_f || 0.0
+    away_pp_goals = clock.dig("power_play", "goals", "visiting")&.to_f || 0.0
+
+    home_power_play_percentage = home_pp_attempts.to_f.positive? ? (home_pp_goals / home_pp_attempts) : 0.0
+    away_power_play_percentage = away_pp_attempts.to_f.positive? ? (away_pp_goals / away_pp_attempts) : 0.0
+
+    home_fow = clock.dig("fow", "home")&.to_f || 0.0
+    away_fow = clock.dig("fow", "visiting")&.to_f || 0.0
+    total_fow = home_fow + away_fow
+
+    home_faceoff_win_percentage = total_fow.positive? ? (home_fow / total_fow) : 0.5
+    away_faceoff_win_percentage = total_fow.positive? ? (away_fow / total_fow) : 0.5
+
+    home_sog = clock.dig("shots_on_goal", "home")&.values&.map(&:to_i)&.sum || 0
+    away_sog = clock.dig("shots_on_goal", "visiting")&.values&.map(&:to_i)&.sum || 0
+
+    game = WhlGame.find_or_initialize_by(game_id: game_id)
+    game.assign_attributes(
+      season_id: clock["season_id"] || fallback_game["SeasonID"],
+      season_name: clock["season_name"] || fallback_game["SeasonName"],
+      game_date: safe_iso8601_to_date(clock["game_date_iso_8601"] || fallback_game["GameDateISO8601"]),
+      venue: clock["venue"] || fallback_game["venue_name"],
+      status: clock["progress"] || fallback_game["GameStatusString"],
+      home_team_id: home_team_id,
+      away_team_id: away_team_id,
+      home_team: clock.dig("home_team", "name") || fallback_game["HomeLongName"],
+      away_team: clock.dig("visiting_team", "name") || fallback_game["VisitorLongName"],
+      home_goal_count: clock["home_goal_count"]&.to_i,
+      away_goal_count: clock["visiting_goal_count"]&.to_i,
+      game_number: clock["game_number"]&.to_i,
+      period: clock["period"],
+      scoring_breakdown: clock["scoring"],
+      shots_on_goal: clock["shots_on_goal"],
+      power_play: clock["power_play"],
+      fow: clock["fow"],
+      home_power_play_percentage: home_power_play_percentage,
+      away_power_play_percentage: away_power_play_percentage,
+      home_faceoff_win_percentage: home_faceoff_win_percentage,
+      away_faceoff_win_percentage: away_faceoff_win_percentage,
+      home_shots_on_goal_total: home_sog,
+      away_shots_on_goal_total: away_sog
+    )
+
+    game.save!
+    game
+  end
+
+  def update_prediction_records(whl_game:, logger:)
+    home_team = WhlTeam.find_by(hockeytech_id: whl_game.home_team_id)
+    away_team = WhlTeam.find_by(hockeytech_id: whl_game.away_team_id)
+    return unless home_team && away_team
+
+    actual_winner_id = if whl_game.home_goal_count.to_i > whl_game.away_goal_count.to_i
+      home_team.id
+    elsif whl_game.home_goal_count.to_i < whl_game.away_goal_count.to_i
+      away_team.id
     end
+
+    WhlPredictionRecord.where(game_id: whl_game.game_id).find_each do |record|
+      predicted_winner_id = record.home_team_probability.to_f >= record.away_team_probability.to_f ?
+        record.home_team_id : record.away_team_id
+
+      record.update!(
+        actual_winner_id: actual_winner_id,
+        predicted_winner_id: predicted_winner_id,
+        correct: actual_winner_id.present? ? (predicted_winner_id == actual_winner_id) : nil
+      )
+
+      logger.info "Updated prediction record #{record.id} for game #{whl_game.game_id}"
+    end
+  end
+
+  def safe_iso8601_to_date(value)
+    return nil if value.blank?
+
+    Date.iso8601(value)
+  rescue ArgumentError
+    nil
   end
 end

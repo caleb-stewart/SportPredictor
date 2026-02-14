@@ -57,6 +57,9 @@ environment
 import:whl_stats
 log:clear
 predictor:run
+predictor_v2:daily_pipeline
+predictor_v2:predict_upcoming
+predictor_v2:train
 railties:install:migrations
 solid_cable:install
 solid_cable:update
