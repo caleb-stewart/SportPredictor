@@ -1,84 +1,117 @@
-# SportPredictor
+# SportPredictor (Python-Only FastAPI Backend)
 
-Rails API + Flask microservice for WHL game outcome prediction.
+Single-backend WHL predictor using FastAPI + SQLAlchemy + APScheduler on the existing Postgres schema.
 
-## Required DB Migration
+## Pre-Cutover Safety
 
-Before using Predictor V2 persistence fields:
-
-```bash
-bin/rails db:migrate
-```
-
-## Predictor V2 (Hybrid Ensemble)
-
-The v2 predictor uses pre-trained artifacts (not per-request training) and expects a matchup payload with precomputed rolling features for `k=5/10/15`.
-
-### Train and Promote Model
+Create a backup before schema/runtime changes:
 
 ```bash
-PredictorFlask/pf-venv/bin/python PredictorFlask/train_whl_v2.py \
-  --db-host localhost \
-  --db-port 5432 \
-  --db-name sportpredictor_development \
-  --db-user postgres \
-  --db-password qqqq
+mkdir -p backups
+ts=$(date -u +%Y%m%dT%H%M%SZ)
+PGPASSWORD=qqqq pg_dump -h localhost -U postgres -d sportpredictor_development -Fc -f backups/pre_cutover_${ts}.dump
 ```
 
-This writes versioned artifacts under `PredictorFlask/model_store/whl_v2/<version>/` and updates `active_model.json` only if gates pass.
-
-### Export Canonical Training Dataset
+Restore example:
 
 ```bash
-PredictorFlask/pf-venv/bin/python PredictorFlask/export_whl_v2_dataset.py \
-  --db-host localhost \
-  --db-port 5432 \
-  --db-name sportpredictor_development \
-  --db-user postgres \
-  --db-password qqqq
+PGPASSWORD=qqqq pg_restore -h localhost -U postgres -d sportpredictor_development --clean --if-exists backups/pre_cutover_<timestamp>.dump
 ```
 
-### Rails Rake Tasks
+Capture baseline table counts:
 
 ```bash
-bin/rake predictor_v2:train
-bin/rake predictor_v2:predict_upcoming
-bin/rake predictor_v2:daily_pipeline
+PGPASSWORD=qqqq psql -h localhost -U postgres -d sportpredictor_development -At -c "\
+SELECT 'whl_games|'||count(*) FROM whl_games UNION ALL \
+SELECT 'whl_teams|'||count(*) FROM whl_teams UNION ALL \
+SELECT 'whl_rolling_averages|'||count(*) FROM whl_rolling_averages UNION ALL \
+SELECT 'whl_prediction_records|'||count(*) FROM whl_prediction_records;"
 ```
 
-### Flask API Contract (v2)
+## Setup
 
-`POST /whl/calc_winner`
-
-Request:
-
-```json
-{
-  "game_id": 1022064,
-  "game_date": "2026-02-15",
-  "home_team_id": 215,
-  "away_team_id": 206,
-  "features_by_k": {
-    "5": { "home": { "goals_for_avg": 3.2 }, "away": { "goals_for_avg": 2.9 } },
-    "10": { "home": { "goals_for_avg": 3.1 }, "away": { "goals_for_avg": 2.8 } },
-    "15": { "home": { "goals_for_avg": 3.0 }, "away": { "goals_for_avg": 2.7 } }
-  }
-}
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Response:
+The training pipeline uses the `psql` CLI to export canonical datasets, so PostgreSQL client tools must be installed.
 
-```json
-{
-  "home_team_prob": 0.62,
-  "away_team_prob": 0.38,
-  "predicted_winner_id": 215,
-  "model_version": "20260214T181647Z",
-  "model_family": "whl_v2_hybrid_logistic_stacker",
-  "k_components": {
-    "5": { "home_team_prob": 0.60, "away_team_prob": 0.40 },
-    "10": { "home_team_prob": 0.63, "away_team_prob": 0.37 },
-    "15": { "home_team_prob": 0.65, "away_team_prob": 0.35 }
-  }
-}
+## Environment
+
+Required:
+- `DATABASE_URL`
+- `HOCKEYTECH_API`
+
+Recommended defaults are in `.env.example`.
+
+## Database Migrations (Alembic)
+
+Existing DB cutover:
+
+```bash
+alembic stamp 20260214_180000
+alembic upgrade head
+```
+
+Fresh DB:
+
+```bash
+alembic upgrade head
+```
+
+## Run Locally
+
+Start backend + frontend with migrations and browser open:
+
+```bash
+./start.sh
+```
+
+Direct API run:
+
+```bash
+uvicorn main:app --reload --port 3141
+```
+
+## API Endpoints
+
+- `GET /health`
+- `GET /teams`
+- `GET /games/upcoming?date=YYYY-MM-DD`
+- `POST /predictions/upcoming/run?date=YYYY-MM-DD`
+- `POST /predictions/custom`
+- `GET /predictions/history?date_from=&date_to=&team_id=&k_value=`
+- `POST /models/train`
+- `GET /models/active`
+
+## Scheduler (APScheduler)
+
+Timezone: `America/Los_Angeles`
+
+- `09:00` fetch next-day schedule
+- `09:10` fetch yesterday updates
+- `09:20` recompute rolling averages
+- `09:30` train model (stage candidate)
+- `09:40` promote staged model (if gates pass)
+- `09:45` predict next-day games
+
+Manual daily run:
+
+```bash
+python scripts/run_daily_pipeline.py
+```
+
+## Model Artifacts
+
+Stored under `model_store/whl_v2/`:
+- versioned bundles (`model_bundle.joblib`, `metrics.json`, `metadata.json`)
+- `active_model.json`
+- `pending_model.json`
+
+## Tests
+
+```bash
+pytest -q
 ```

@@ -1,0 +1,32 @@
+service: sport_predictor_fastapi
+image: your-user/sport_predictor_fastapi
+
+servers:
+  web:
+    - 192.168.0.1
+
+proxy:
+  ssl: true
+  host: api.example.com
+  app_port: 3141
+
+registry:
+  username: your-user
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+env:
+  clear:
+    API_PORT: 3141
+    SCHEDULER_ENABLED: "true"
+    SCHEDULER_TIMEZONE: America/Los_Angeles
+  secret:
+    - DATABASE_URL
+    - HOCKEYTECH_API
+
+aliases:
+  shell: app exec --interactive --reuse "bash"
+  logs: app logs -f
+
+builder:
+  arch: amd64

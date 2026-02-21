@@ -1,2 +1,0 @@
-class WhlRollingAverage < ApplicationRecord
-end

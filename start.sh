@@ -1,29 +1,78 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Function to kill all child processes when the script exits
+API_PORT="${API_PORT:-3141}"
+FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+FRONTEND_DIR="${FRONTEND_DIR:-../sport-predictor-vue}"
+PYTHON_BIN="${PYTHON_BIN:-.venv/bin/python}"
+ALEMBIC_BIN="${ALEMBIC_BIN:-.venv/bin/alembic}"
+FRONTEND_URL="http://localhost:${FRONTEND_PORT}/"
+
+API_PID=""
+UI_PID=""
+
 cleanup() {
-  echo "[BASH] Stopping all servers..."
-  # kill all background jobs started by this script
-  kill $(jobs -p) 2>/dev/null
-  deactivate
+  echo "[start.sh] Stopping running services..."
+  if [[ -n "${API_PID}" ]] && kill -0 "${API_PID}" 2>/dev/null; then
+    kill "${API_PID}" 2>/dev/null || true
+  fi
+  if [[ -n "${UI_PID}" ]] && kill -0 "${UI_PID}" 2>/dev/null; then
+    kill "${UI_PID}" 2>/dev/null || true
+  fi
 }
-
-# Trap EXIT signal (script ending) to run cleanup
 trap cleanup EXIT
 
-echo "[BASH] Starting Rails server on port 3141..."
-rails s -p 3141 &
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+  echo "[start.sh] Missing Python runtime at ${PYTHON_BIN}. Create it with: python3 -m venv .venv"
+  exit 1
+fi
 
-echo "[BASH] Starting Flask server on port 2718..."
-source PredictorFlask/pf-venv/bin/activate
-python3 PredictorFlask/app.py &
+if [[ ! -x "${ALEMBIC_BIN}" ]]; then
+  echo "[start.sh] Missing Alembic CLI at ${ALEMBIC_BIN}. Run: .venv/bin/pip install -r requirements.txt"
+  exit 1
+fi
 
-echo "[BASH] Starting Vue app on port 5173..."
-cd ../sport-predictor-vue
-yarn dev &
+if [[ ! -d "${FRONTEND_DIR}" ]]; then
+  echo "[start.sh] Frontend directory not found: ${FRONTEND_DIR}"
+  exit 1
+fi
 
-open http://localhost:5173/
+if ! command -v yarn >/dev/null 2>&1; then
+  echo "[start.sh] yarn is required but not installed."
+  exit 1
+fi
 
-# Wait for all background jobs to finish (so the script doesn't exit immediately)
-wait
- 
+echo "[start.sh] Running Alembic migrations..."
+"${ALEMBIC_BIN}" upgrade head
+
+echo "[start.sh] Starting FastAPI on port ${API_PORT}..."
+"${PYTHON_BIN}" -m uvicorn main:app --host 0.0.0.0 --port "${API_PORT}" &
+API_PID=$!
+
+echo "[start.sh] Starting Vue app on port ${FRONTEND_PORT}..."
+(
+  cd "${FRONTEND_DIR}"
+  yarn dev --host --port "${FRONTEND_PORT}"
+) &
+UI_PID=$!
+
+echo "[start.sh] API health: http://localhost:${API_PORT}/health"
+echo "[start.sh] API docs:   http://localhost:${API_PORT}/docs"
+echo "[start.sh] Frontend:   ${FRONTEND_URL}"
+
+if command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "${FRONTEND_URL}" >/dev/null 2>&1 &
+elif command -v open >/dev/null 2>&1; then
+  open "${FRONTEND_URL}" >/dev/null 2>&1 &
+else
+  echo "[start.sh] Cannot auto-open browser: neither 'xdg-open' nor 'open' is available."
+  exit 1
+fi
+
+set +e
+wait -n "${API_PID}" "${UI_PID}"
+EXIT_CODE=$?
+set -e
+
+echo "[start.sh] A managed process exited unexpectedly (code=${EXIT_CODE})."
+exit "${EXIT_CODE}"
