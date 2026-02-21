@@ -1,6 +1,6 @@
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
-sqlalchemy==2.0.43
+sqlalchemy==2.0.46
 psycopg2-binary==2.9.10
 alembic==1.16.5
 apscheduler==3.11.0
