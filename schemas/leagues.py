@@ -25,6 +25,38 @@ class LeagueTeamResponse(BaseModel):
     active: bool
 
 
+class TeamPerformanceStatsResponse(BaseModel):
+    games_with_predictions: int
+    resolved_games: int
+    pending_games: int
+    correct_predictions: int
+    accuracy_pct: Optional[float]
+    actual_wins: int
+    actual_losses: int
+    predicted_wins: int
+    predicted_losses: int
+    win_delta: int
+
+
+class LeagueTeamPerformanceResponse(BaseModel):
+    team: LeagueTeamResponse
+    stats: TeamPerformanceStatsResponse
+
+
+class LeagueTeamPerformanceListResponse(BaseModel):
+    league_code: str
+    date_from: Optional[dt.date]
+    date_to: Optional[dt.date]
+    items: list[LeagueTeamPerformanceResponse]
+
+
+class LeagueTeamPerformanceDetailResponse(BaseModel):
+    league_code: str
+    date_from: Optional[dt.date]
+    date_to: Optional[dt.date]
+    item: LeagueTeamPerformanceResponse
+
+
 class GameScoreResponse(BaseModel):
     home: Optional[int]
     away: Optional[int]

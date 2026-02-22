@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     model_store_root: str = str(Path(__file__).resolve().parents[1] / "model_store" / "whl_v2")
     active_model_file: str = "active_model.json"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173"
+    cors_origin_regex: str | None = Field(
+        default=(
+            r"^https?://("
+            r"localhost|127\.0\.0\.1|"
+            r"[a-zA-Z0-9-]+(?:\.local)?|"
+            r"10(?:\.\d{1,3}){3}|"
+            r"192\.168(?:\.\d{1,3}){2}|"
+            r"172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}"
+            r")(?::\d+)?$"
+        ),
+        alias="CORS_ORIGIN_REGEX",
+    )
     data_backend: str = "chl"
     dual_write: bool = False
     default_league_code: str = "whl"
@@ -55,6 +67,14 @@ class Settings(BaseSettings):
     @cached_property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @cached_property
+    def cors_origin_regex_value(self) -> str | None:
+        value = (self.cors_origin_regex or "").strip()
+        if not value:
+            return None
+        # Allow either "\." or "\\." style escapes from .env files.
+        return value.replace("\\\\", "\\")
 
     @cached_property
     def data_backend_normalized(self) -> str:

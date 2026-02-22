@@ -5,7 +5,7 @@ import math
 from collections import defaultdict
 from typing import Any
 
-from sqlalchemy import and_, asc, desc, func, or_, select
+from sqlalchemy import and_, asc, case, desc, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from db.models import ChlGame, ChlPredictionRecord, ChlTeam
@@ -42,6 +42,10 @@ class DailyReportNotFoundError(LeagueServiceError):
 
 
 class GameNotFoundError(LeagueServiceError):
+    pass
+
+
+class TeamNotFoundError(LeagueServiceError):
     pass
 
 
@@ -182,6 +186,245 @@ def list_league_teams(
 
     teams = db.scalars(stmt).all()
     return [_serialize_team(team, league_code=normalized_league) for team in teams]
+
+
+def _empty_team_performance_stats() -> dict[str, Any]:
+    return {
+        "games_with_predictions": 0,
+        "resolved_games": 0,
+        "pending_games": 0,
+        "correct_predictions": 0,
+        "accuracy_pct": None,
+        "actual_wins": 0,
+        "actual_losses": 0,
+        "predicted_wins": 0,
+        "predicted_losses": 0,
+        "win_delta": 0,
+    }
+
+
+def _finalize_team_performance_stats(stats: dict[str, Any]) -> dict[str, Any]:
+    resolved_games = int(stats["resolved_games"])
+    games_with_predictions = int(stats["games_with_predictions"])
+    correct_predictions = int(stats["correct_predictions"])
+    actual_wins = int(stats["actual_wins"])
+    predicted_wins = int(stats["predicted_wins"])
+
+    stats["pending_games"] = max(0, games_with_predictions - resolved_games)
+    stats["accuracy_pct"] = round((correct_predictions / resolved_games) * 100.0, 2) if resolved_games > 0 else None
+    stats["win_delta"] = predicted_wins - actual_wins
+    return stats
+
+
+def _query_consensus_prediction_rows(
+    db: Session,
+    *,
+    league_id: int,
+    game_date_from: dt.date | None,
+    game_date_to: dt.date | None,
+    team_db_id: int | None = None,
+) -> list[dict[str, Any]]:
+    priority_expr = case(
+        (ChlPredictionRecord.k_value == 15, 0),
+        else_=1,
+    )
+    row_rank = func.row_number().over(
+        partition_by=(ChlPredictionRecord.league_id, ChlPredictionRecord.game_id),
+        order_by=(
+            priority_expr.asc(),
+            ChlPredictionRecord.k_value.desc(),
+            ChlPredictionRecord.prediction_date.desc().nullslast(),
+            ChlPredictionRecord.id.desc(),
+        ),
+    )
+
+    ranked_stmt = (
+        select(
+            ChlPredictionRecord.game_id.label("game_id"),
+            ChlPredictionRecord.home_team_id.label("home_team_id"),
+            ChlPredictionRecord.away_team_id.label("away_team_id"),
+            ChlPredictionRecord.predicted_winner_id.label("predicted_winner_id"),
+            ChlPredictionRecord.actual_winner_id.label("actual_winner_id"),
+            ChlPredictionRecord.correct.label("correct"),
+            row_rank.label("row_rank"),
+        )
+        .join(
+            ChlGame,
+            and_(
+                ChlGame.league_id == ChlPredictionRecord.league_id,
+                ChlGame.game_id == ChlPredictionRecord.game_id,
+            ),
+        )
+        .where(ChlPredictionRecord.league_id == league_id)
+        .where(ChlGame.game_date.is_not(None))
+    )
+
+    if game_date_from is not None:
+        ranked_stmt = ranked_stmt.where(ChlGame.game_date >= game_date_from)
+    if game_date_to is not None:
+        ranked_stmt = ranked_stmt.where(ChlGame.game_date <= game_date_to)
+    if team_db_id is not None:
+        ranked_stmt = ranked_stmt.where(
+            or_(
+                ChlPredictionRecord.home_team_id == team_db_id,
+                ChlPredictionRecord.away_team_id == team_db_id,
+            )
+        )
+
+    ranked_subquery = ranked_stmt.subquery("ranked_predictions")
+    consensus_stmt = select(
+        ranked_subquery.c.game_id,
+        ranked_subquery.c.home_team_id,
+        ranked_subquery.c.away_team_id,
+        ranked_subquery.c.predicted_winner_id,
+        ranked_subquery.c.actual_winner_id,
+        ranked_subquery.c.correct,
+    ).where(ranked_subquery.c.row_rank == 1)
+
+    rows = db.execute(consensus_stmt).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def _build_team_performance_items(
+    *,
+    teams: list[ChlTeam],
+    league_code: str,
+    consensus_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    team_by_id = {int(team.id): team for team in teams}
+    stats_by_team_id = {int(team.id): _empty_team_performance_stats() for team in teams}
+
+    for row in consensus_rows:
+        home_team_id = int(row["home_team_id"]) if row["home_team_id"] is not None else None
+        away_team_id = int(row["away_team_id"]) if row["away_team_id"] is not None else None
+        correct = row.get("correct")
+        predicted_winner_id = int(row["predicted_winner_id"]) if row["predicted_winner_id"] is not None else None
+        actual_winner_id = int(row["actual_winner_id"]) if row["actual_winner_id"] is not None else None
+
+        for team_id in (home_team_id, away_team_id):
+            if team_id is None:
+                continue
+            stats = stats_by_team_id.get(team_id)
+            if stats is None:
+                continue
+
+            stats["games_with_predictions"] += 1
+
+            if correct is None:
+                continue
+
+            stats["resolved_games"] += 1
+            if correct is True:
+                stats["correct_predictions"] += 1
+
+            if actual_winner_id is not None:
+                if actual_winner_id == team_id:
+                    stats["actual_wins"] += 1
+                else:
+                    stats["actual_losses"] += 1
+
+            if predicted_winner_id is not None:
+                if predicted_winner_id == team_id:
+                    stats["predicted_wins"] += 1
+                else:
+                    stats["predicted_losses"] += 1
+
+    items: list[dict[str, Any]] = []
+    for team in teams:
+        team_id = int(team.id)
+        finalized_stats = _finalize_team_performance_stats(stats_by_team_id.get(team_id, _empty_team_performance_stats()))
+        items.append(
+            {
+                "team": _serialize_team(team_by_id[team_id], league_code=league_code),
+                "stats": finalized_stats,
+            }
+        )
+
+    return items
+
+
+def list_team_performance(
+    db: Session,
+    league_code: str,
+    *,
+    date_from: dt.date | None,
+    date_to: dt.date | None,
+    active_only: bool = True,
+) -> dict[str, Any]:
+    normalized_league = _ensure_league(league_code)
+    league_id = _league_id_for_code(normalized_league)
+
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise ValueError("date_from cannot be after date_to.")
+
+    teams_stmt = select(ChlTeam).where(ChlTeam.league_id == league_id).order_by(ChlTeam.name.asc())
+    if active_only:
+        teams_stmt = teams_stmt.where(ChlTeam.active.is_(True))
+    teams = db.scalars(teams_stmt).all()
+
+    consensus_rows = _query_consensus_prediction_rows(
+        db,
+        league_id=league_id,
+        game_date_from=date_from,
+        game_date_to=date_to,
+        team_db_id=None,
+    )
+    items = _build_team_performance_items(
+        teams=teams,
+        league_code=normalized_league,
+        consensus_rows=consensus_rows,
+    )
+
+    return {
+        "league_code": normalized_league,
+        "date_from": date_from,
+        "date_to": date_to,
+        "items": items,
+    }
+
+
+def get_team_performance(
+    db: Session,
+    league_code: str,
+    *,
+    team_provider_id: int,
+    date_from: dt.date | None,
+    date_to: dt.date | None,
+) -> dict[str, Any]:
+    normalized_league = _ensure_league(league_code)
+    league_id = _league_id_for_code(normalized_league)
+
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise ValueError("date_from cannot be after date_to.")
+
+    team = db.scalar(
+        select(ChlTeam).where(
+            ChlTeam.league_id == league_id,
+            ChlTeam.hockeytech_id == team_provider_id,
+        )
+    )
+    if team is None:
+        raise TeamNotFoundError(f"Team not found for provider_team_id={team_provider_id}")
+
+    consensus_rows = _query_consensus_prediction_rows(
+        db,
+        league_id=league_id,
+        game_date_from=date_from,
+        game_date_to=date_to,
+        team_db_id=int(team.id),
+    )
+    items = _build_team_performance_items(
+        teams=[team],
+        league_code=normalized_league,
+        consensus_rows=consensus_rows,
+    )
+
+    return {
+        "league_code": normalized_league,
+        "date_from": date_from,
+        "date_to": date_to,
+        "item": items[0],
+    }
 
 
 def _query_prediction_rows(

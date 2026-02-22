@@ -9,6 +9,8 @@ from db.session import get_db
 from schemas.leagues import (
     DailyReportDetailResponse,
     DailyReportSummaryResponse,
+    LeagueTeamPerformanceDetailResponse,
+    LeagueTeamPerformanceListResponse,
     LeagueMaintenanceStatusResponse,
     LeagueGameDetailResponse,
     LeagueResponse,
@@ -30,10 +32,13 @@ from services.maintenance import (
 from services.leagues import (
     DailyReportNotFoundError,
     GameNotFoundError,
+    TeamNotFoundError,
     UnknownLeagueError,
+    get_team_performance,
     get_daily_report_detail,
     get_game_detail,
     get_next_predicted_slate,
+    list_team_performance,
     list_daily_reports,
     list_league_teams,
     list_prediction_results,
@@ -64,6 +69,56 @@ def league_teams(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return [LeagueTeamResponse.model_validate(row) for row in rows]
+
+
+@router.get("/{league_code}/teams/performance", response_model=LeagueTeamPerformanceListResponse)
+def league_team_performance(
+    league_code: str,
+    date_from: dt.date | None = Query(default=None),
+    date_to: dt.date | None = Query(default=None),
+    active_only: bool = Query(default=True),
+    db: Session = Depends(get_db),
+) -> LeagueTeamPerformanceListResponse:
+    try:
+        payload = list_team_performance(
+            db=db,
+            league_code=league_code,
+            date_from=date_from,
+            date_to=date_to,
+            active_only=active_only,
+        )
+    except UnknownLeagueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return LeagueTeamPerformanceListResponse.model_validate(payload)
+
+
+@router.get("/{league_code}/teams/{team_provider_id}/performance", response_model=LeagueTeamPerformanceDetailResponse)
+def league_single_team_performance(
+    league_code: str,
+    team_provider_id: int,
+    date_from: dt.date | None = Query(default=None),
+    date_to: dt.date | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> LeagueTeamPerformanceDetailResponse:
+    try:
+        payload = get_team_performance(
+            db=db,
+            league_code=league_code,
+            team_provider_id=team_provider_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    except UnknownLeagueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return LeagueTeamPerformanceDetailResponse.model_validate(payload)
 
 
 @router.get("/{league_code}/maintenance/status", response_model=LeagueMaintenanceStatusResponse)

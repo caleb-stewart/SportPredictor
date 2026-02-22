@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from types import SimpleNamespace
 
 from services import leagues as leagues_service
 
@@ -329,3 +330,159 @@ def test_list_prediction_results_by_day_rejects_invalid_result():
         assert "Unsupported result filter" in str(exc)
     else:
         raise AssertionError("Expected ValueError for invalid result")
+
+
+def _team_row(team_id: int, provider_team_id: int, name: str):
+    return SimpleNamespace(
+        id=team_id,
+        hockeytech_id=provider_team_id,
+        name=name,
+        city=None,
+        conference=None,
+        division=None,
+        logo_url=None,
+        active=True,
+    )
+
+
+def test_choose_consensus_prediction_prefers_k15_then_highest_k():
+    rows_no_k15 = [
+        {"k_value": 5, "predicted_winner_name": "Away"},
+        {"k_value": 10, "predicted_winner_name": "Home"},
+    ]
+    rows_with_k15 = [
+        {"k_value": 5, "predicted_winner_name": "Away"},
+        {"k_value": 10, "predicted_winner_name": "Away"},
+        {"k_value": 15, "predicted_winner_name": "Home"},
+    ]
+
+    selected_without_k15 = leagues_service._choose_consensus_prediction(rows_no_k15)
+    selected_with_k15 = leagues_service._choose_consensus_prediction(rows_with_k15)
+
+    assert selected_without_k15 is not None
+    assert selected_without_k15["k_value"] == 10
+    assert selected_with_k15 is not None
+    assert selected_with_k15["k_value"] == 15
+
+
+def test_build_team_performance_items_computes_metrics():
+    teams = [
+        _team_row(1, 215, "Spokane Chiefs"),
+        _team_row(2, 222, "Wenatchee Wild"),
+    ]
+    consensus_rows = [
+        {
+            "game_id": 1001,
+            "home_team_id": 1,
+            "away_team_id": 2,
+            "predicted_winner_id": 1,
+            "actual_winner_id": 1,
+            "correct": True,
+        },
+        {
+            "game_id": 1002,
+            "home_team_id": 1,
+            "away_team_id": 2,
+            "predicted_winner_id": 2,
+            "actual_winner_id": 1,
+            "correct": False,
+        },
+        {
+            "game_id": 1003,
+            "home_team_id": 1,
+            "away_team_id": 2,
+            "predicted_winner_id": 1,
+            "actual_winner_id": None,
+            "correct": None,
+        },
+    ]
+
+    items = leagues_service._build_team_performance_items(
+        teams=teams,
+        league_code="whl",
+        consensus_rows=consensus_rows,
+    )
+    by_provider_id = {item["team"]["provider_team_id"]: item for item in items}
+
+    chiefs = by_provider_id[215]["stats"]
+    wild = by_provider_id[222]["stats"]
+
+    assert chiefs["games_with_predictions"] == 3
+    assert chiefs["resolved_games"] == 2
+    assert chiefs["pending_games"] == 1
+    assert chiefs["correct_predictions"] == 1
+    assert chiefs["accuracy_pct"] == 50.0
+    assert chiefs["actual_wins"] == 2
+    assert chiefs["actual_losses"] == 0
+    assert chiefs["predicted_wins"] == 1
+    assert chiefs["predicted_losses"] == 1
+    assert chiefs["win_delta"] == -1
+
+    assert wild["games_with_predictions"] == 3
+    assert wild["resolved_games"] == 2
+    assert wild["pending_games"] == 1
+    assert wild["correct_predictions"] == 1
+    assert wild["accuracy_pct"] == 50.0
+    assert wild["actual_wins"] == 0
+    assert wild["actual_losses"] == 2
+    assert wild["predicted_wins"] == 1
+    assert wild["predicted_losses"] == 1
+    assert wild["win_delta"] == 1
+
+
+def test_build_team_performance_items_accuracy_is_null_when_no_resolved_games():
+    teams = [_team_row(1, 215, "Spokane Chiefs")]
+    consensus_rows = [
+        {
+            "game_id": 2001,
+            "home_team_id": 1,
+            "away_team_id": 2,
+            "predicted_winner_id": 1,
+            "actual_winner_id": None,
+            "correct": None,
+        }
+    ]
+
+    items = leagues_service._build_team_performance_items(
+        teams=teams,
+        league_code="whl",
+        consensus_rows=consensus_rows,
+    )
+    stats = items[0]["stats"]
+    assert stats["resolved_games"] == 0
+    assert stats["pending_games"] == 1
+    assert stats["accuracy_pct"] is None
+
+
+def test_team_performance_rejects_invalid_date_range():
+    try:
+        leagues_service.list_team_performance(
+            db=object(),
+            league_code="whl",
+            date_from=dt.date(2026, 2, 20),
+            date_to=dt.date(2025, 9, 1),
+            active_only=True,
+        )
+    except ValueError as exc:
+        assert "date_from cannot be after date_to" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for invalid date range")
+
+
+def test_get_team_performance_raises_for_missing_team():
+    class _MissingTeamDb:
+        def scalar(self, _stmt):
+            return None
+
+    try:
+        leagues_service.get_team_performance(
+            db=_MissingTeamDb(),
+            league_code="whl",
+            team_provider_id=9999,
+            date_from=None,
+            date_to=None,
+        )
+    except leagues_service.TeamNotFoundError as exc:
+        assert "provider_team_id=9999" in str(exc)
+    else:
+        raise AssertionError("Expected TeamNotFoundError for unknown team")

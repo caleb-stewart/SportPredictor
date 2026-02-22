@@ -117,6 +117,147 @@ def test_league_teams_endpoint_returns_normalized_team_payload(monkeypatch):
     assert {"db_team_id", "provider_team_id", "logo_url", "name"} <= set(team.keys())
 
 
+def test_team_performance_list_endpoint_returns_aggregates(monkeypatch):
+    from api.routes import leagues as leagues_route
+
+    monkeypatch.setattr(
+        leagues_route,
+        "list_team_performance",
+        lambda **_kwargs: {
+            "league_code": "whl",
+            "date_from": dt.date(2025, 9, 1),
+            "date_to": dt.date(2026, 2, 20),
+            "items": [
+                {
+                    "team": {
+                        "db_team_id": 1,
+                        "provider_team_id": 215,
+                        "name": "Spokane Chiefs",
+                        "city": "Spokane",
+                        "conference": "Western",
+                        "division": "U.S. Division",
+                        "logo_url": "https://assets.leaguestat.com/whl/logos/215.png",
+                        "active": True,
+                    },
+                    "stats": {
+                        "games_with_predictions": 100,
+                        "resolved_games": 80,
+                        "pending_games": 20,
+                        "correct_predictions": 49,
+                        "accuracy_pct": 61.25,
+                        "actual_wins": 41,
+                        "actual_losses": 39,
+                        "predicted_wins": 44,
+                        "predicted_losses": 36,
+                        "win_delta": 3,
+                    },
+                }
+            ],
+        },
+    )
+
+    app.dependency_overrides[get_db] = _fake_get_db
+    client = TestClient(app)
+    try:
+        response = client.get("/leagues/whl/teams/performance")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["league_code"] == "whl"
+    assert body["items"][0]["team"]["name"] == "Spokane Chiefs"
+    assert body["items"][0]["stats"]["accuracy_pct"] == 61.25
+
+
+def test_team_performance_detail_endpoint_returns_single_team(monkeypatch):
+    from api.routes import leagues as leagues_route
+
+    monkeypatch.setattr(
+        leagues_route,
+        "get_team_performance",
+        lambda **_kwargs: {
+            "league_code": "whl",
+            "date_from": None,
+            "date_to": None,
+            "item": {
+                "team": {
+                    "db_team_id": 1,
+                    "provider_team_id": 215,
+                    "name": "Spokane Chiefs",
+                    "city": "Spokane",
+                    "conference": "Western",
+                    "division": "U.S. Division",
+                    "logo_url": "https://assets.leaguestat.com/whl/logos/215.png",
+                    "active": True,
+                },
+                "stats": {
+                    "games_with_predictions": 200,
+                    "resolved_games": 180,
+                    "pending_games": 20,
+                    "correct_predictions": 110,
+                    "accuracy_pct": 61.11,
+                    "actual_wins": 92,
+                    "actual_losses": 88,
+                    "predicted_wins": 95,
+                    "predicted_losses": 85,
+                    "win_delta": 3,
+                },
+            },
+        },
+    )
+
+    app.dependency_overrides[get_db] = _fake_get_db
+    client = TestClient(app)
+    try:
+        response = client.get("/leagues/whl/teams/215/performance")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["item"]["team"]["provider_team_id"] == 215
+    assert body["item"]["stats"]["resolved_games"] == 180
+
+
+def test_team_performance_detail_endpoint_returns_404_when_team_missing(monkeypatch):
+    from api.routes import leagues as leagues_route
+
+    def _raise_missing(**_kwargs):
+        raise leagues_route.TeamNotFoundError("Team not found for provider_team_id=9999")
+
+    monkeypatch.setattr(leagues_route, "get_team_performance", _raise_missing)
+
+    app.dependency_overrides[get_db] = _fake_get_db
+    client = TestClient(app)
+    try:
+        response = client.get("/leagues/whl/teams/9999/performance")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_team_performance_endpoint_returns_422_for_invalid_date_range(monkeypatch):
+    from api.routes import leagues as leagues_route
+
+    def _raise_value_error(**_kwargs):
+        raise ValueError("date_from cannot be after date_to.")
+
+    monkeypatch.setattr(leagues_route, "list_team_performance", _raise_value_error)
+
+    app.dependency_overrides[get_db] = _fake_get_db
+    client = TestClient(app)
+    try:
+        response = client.get("/leagues/whl/teams/performance?date_from=2026-02-20&date_to=2025-09-01")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert "date_from cannot be after date_to" in response.json()["detail"]
+
+
 def test_maintenance_status_endpoint_returns_payload(monkeypatch):
     from api.routes import leagues as leagues_route
 
