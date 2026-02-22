@@ -196,4 +196,136 @@ def test_list_recent_result_days_groups_latest_distinct_game_dates(monkeypatch):
         dt.date(2026, 2, 20),
         dt.date(2026, 2, 19),
     ]
+    assert payload["days"][0]["resolved_count"] == 1
+    assert payload["days"][0]["correct_count"] == 1
+    assert payload["days"][0]["accuracy_pct"] == 100.0
+    assert payload["days"][1]["resolved_count"] == 1
+    assert payload["days"][1]["correct_count"] == 0
+    assert payload["days"][1]["accuracy_pct"] == 0.0
     assert payload["days"][2]["games_count"] == 1
+
+
+def test_list_prediction_results_by_day_paginates_three_day_groups(monkeypatch):
+    day_keys = [
+        dt.date(2026, 2, 20),
+        dt.date(2026, 2, 19),
+        dt.date(2026, 2, 18),
+    ]
+
+    monkeypatch.setattr(leagues_service, "_count_distinct_result_days", lambda db, base_stmt: 7)
+    monkeypatch.setattr(
+        leagues_service,
+        "_fetch_result_day_keys",
+        lambda db, base_stmt, days_per_page, offset: day_keys,
+    )
+    monkeypatch.setattr(
+        leagues_service,
+        "_fetch_consensus_game_ids_for_days",
+        lambda db, base_stmt, day_keys: [501, 502, 503, 504],
+    )
+    monkeypatch.setattr(
+        leagues_service,
+        "_query_prediction_rows_for_game_ids",
+        lambda db, league_id, game_ids: [],
+    )
+    monkeypatch.setattr(
+        leagues_service,
+        "_aggregate_predicted_games",
+        lambda rows, league_code: [
+            _game_item(
+                game_id=502,
+                game_date=dt.date(2026, 2, 20),
+                scheduled_time=dt.datetime(2026, 2, 20, 5, 0, 0),
+                consensus_correct=False,
+                resolved_count=3,
+                correct_count=0,
+            ),
+            _game_item(
+                game_id=501,
+                game_date=dt.date(2026, 2, 20),
+                scheduled_time=dt.datetime(2026, 2, 20, 2, 0, 0),
+                consensus_correct=True,
+                resolved_count=3,
+                correct_count=3,
+            ),
+            _game_item(
+                game_id=503,
+                game_date=dt.date(2026, 2, 19),
+                scheduled_time=dt.datetime(2026, 2, 19, 3, 0, 0),
+                consensus_correct=True,
+                resolved_count=3,
+                correct_count=2,
+            ),
+            _game_item(
+                game_id=504,
+                game_date=dt.date(2026, 2, 18),
+                scheduled_time=dt.datetime(2026, 2, 18, 1, 0, 0),
+                consensus_correct=False,
+                resolved_count=3,
+                correct_count=1,
+            ),
+        ],
+    )
+
+    payload = leagues_service.list_prediction_results_by_day(
+        db=object(),
+        league_code="whl",
+        game_date_from=None,
+        game_date_to=None,
+        team_provider_id=None,
+        result="all",
+        page=2,
+        days_per_page=3,
+    )
+
+    assert payload["league_code"] == "whl"
+    assert payload["total_days"] == 7
+    assert payload["total_pages"] == 3
+    assert payload["has_prev"] is True
+    assert payload["has_more"] is True
+    assert [day["game_date"] for day in payload["items"]] == day_keys
+    assert [game["game_id"] for game in payload["items"][0]["games"]] == [501, 502]
+    assert payload["items"][0]["resolved_count"] == 2
+    assert payload["items"][0]["correct_count"] == 1
+    assert payload["items"][0]["accuracy_pct"] == 50.0
+
+
+def test_list_prediction_results_by_day_team_not_found_returns_empty(monkeypatch):
+    monkeypatch.setattr(
+        leagues_service,
+        "_resolve_team_db_id_for_league",
+        lambda db, league_id, team_provider_id: None,
+    )
+
+    payload = leagues_service.list_prediction_results_by_day(
+        db=object(),
+        league_code="whl",
+        game_date_from=None,
+        game_date_to=None,
+        team_provider_id=9999,
+        result="all",
+        page=1,
+        days_per_page=3,
+    )
+
+    assert payload["items"] == []
+    assert payload["total_days"] == 0
+    assert payload["total_pages"] == 0
+
+
+def test_list_prediction_results_by_day_rejects_invalid_result():
+    try:
+        leagues_service.list_prediction_results_by_day(
+            db=object(),
+            league_code="whl",
+            game_date_from=None,
+            game_date_to=None,
+            team_provider_id=None,
+            result="pending",
+            page=1,
+            days_per_page=3,
+        )
+    except ValueError as exc:
+        assert "Unsupported result filter" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for invalid result")

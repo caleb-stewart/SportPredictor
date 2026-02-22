@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 from collections import defaultdict
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, asc, desc, or_, select
+from sqlalchemy import and_, asc, desc, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from db.models import ChlGame, ChlPredictionRecord, ChlTeam
@@ -536,6 +537,288 @@ def list_prediction_results(
     return _build_prediction_page(resolved_items, limit=limit, offset=offset)
 
 
+def _resolve_team_db_id_for_league(
+    db: Session,
+    *,
+    league_id: int,
+    team_provider_id: int | None,
+) -> int | None:
+    if team_provider_id is None:
+        return None
+
+    team = db.scalar(
+        select(ChlTeam.id).where(
+            ChlTeam.league_id == league_id,
+            ChlTeam.hockeytech_id == team_provider_id,
+        )
+    )
+    return int(team) if team is not None else None
+
+
+def _consensus_results_base_stmt(
+    *,
+    league_id: int,
+    team_db_id: int | None,
+    result: str,
+    game_date_from: dt.date | None,
+    game_date_to: dt.date | None,
+):
+    stmt = (
+        select(ChlPredictionRecord.game_id, ChlGame.game_date)
+        .join(
+            ChlGame,
+            and_(
+                ChlGame.game_id == ChlPredictionRecord.game_id,
+                ChlGame.league_id == ChlPredictionRecord.league_id,
+            ),
+        )
+        .where(ChlPredictionRecord.league_id == league_id)
+        .where(ChlPredictionRecord.k_value == 15)
+        .where(ChlPredictionRecord.correct.is_not(None))
+        .where(ChlGame.game_date.is_not(None))
+    )
+
+    if game_date_from:
+        stmt = stmt.where(ChlGame.game_date >= game_date_from)
+    if game_date_to:
+        stmt = stmt.where(ChlGame.game_date <= game_date_to)
+
+    if team_db_id is not None:
+        stmt = stmt.where(
+            or_(
+                ChlPredictionRecord.home_team_id == team_db_id,
+                ChlPredictionRecord.away_team_id == team_db_id,
+            )
+        )
+
+    if result == "correct":
+        stmt = stmt.where(ChlPredictionRecord.correct.is_(True))
+    elif result == "incorrect":
+        stmt = stmt.where(ChlPredictionRecord.correct.is_(False))
+
+    return stmt
+
+
+def _count_distinct_result_days(db: Session, base_stmt) -> int:
+    day_subquery = base_stmt.with_only_columns(ChlGame.game_date).distinct().subquery()
+    return int(db.scalar(select(func.count()).select_from(day_subquery)) or 0)
+
+
+def _fetch_result_day_keys(
+    db: Session,
+    base_stmt,
+    *,
+    days_per_page: int,
+    offset: int,
+) -> list[dt.date]:
+    rows = (
+        db.execute(
+            base_stmt.with_only_columns(ChlGame.game_date)
+            .distinct()
+            .order_by(ChlGame.game_date.desc())
+            .offset(offset)
+            .limit(days_per_page)
+        )
+        .scalars()
+        .all()
+    )
+    return [row for row in rows if isinstance(row, dt.date)]
+
+
+def _fetch_consensus_game_ids_for_days(
+    db: Session,
+    base_stmt,
+    *,
+    day_keys: list[dt.date],
+) -> list[int]:
+    if not day_keys:
+        return []
+
+    rows = (
+        db.execute(
+            base_stmt.where(ChlGame.game_date.in_(day_keys))
+            .with_only_columns(ChlPredictionRecord.game_id)
+            .distinct()
+        )
+        .scalars()
+        .all()
+    )
+    return [int(row) for row in rows]
+
+
+def _query_prediction_rows_for_game_ids(
+    db: Session,
+    *,
+    league_id: int,
+    game_ids: list[int],
+) -> list[tuple[ChlPredictionRecord, ChlGame | None, ChlTeam | None, ChlTeam | None, ChlTeam | None, ChlTeam | None]]:
+    if not game_ids:
+        return []
+
+    home_team = aliased(ChlTeam)
+    away_team = aliased(ChlTeam)
+    predicted_team = aliased(ChlTeam)
+    actual_team = aliased(ChlTeam)
+
+    stmt = (
+        select(
+            ChlPredictionRecord,
+            ChlGame,
+            home_team,
+            away_team,
+            predicted_team,
+            actual_team,
+        )
+        .join(
+            ChlGame,
+            and_(
+                ChlGame.game_id == ChlPredictionRecord.game_id,
+                ChlGame.league_id == ChlPredictionRecord.league_id,
+            ),
+            isouter=True,
+        )
+        .join(home_team, home_team.id == ChlPredictionRecord.home_team_id)
+        .join(away_team, away_team.id == ChlPredictionRecord.away_team_id)
+        .join(predicted_team, predicted_team.id == ChlPredictionRecord.predicted_winner_id, isouter=True)
+        .join(actual_team, actual_team.id == ChlPredictionRecord.actual_winner_id, isouter=True)
+        .where(ChlPredictionRecord.league_id == league_id)
+        .where(ChlPredictionRecord.game_id.in_(game_ids))
+        .order_by(desc(ChlPredictionRecord.prediction_date), desc(ChlPredictionRecord.id))
+    )
+
+    return db.execute(stmt).all()
+
+
+def list_prediction_results_by_day(
+    db: Session,
+    league_code: str,
+    *,
+    game_date_from: dt.date | None,
+    game_date_to: dt.date | None,
+    team_provider_id: int | None,
+    result: str,
+    page: int,
+    days_per_page: int,
+) -> dict[str, Any]:
+    normalized_league = _ensure_league(league_code)
+    league_id = _league_id_for_code(normalized_league)
+
+    if result not in VALID_RESOLVED_RESULTS:
+        raise ValueError(f"Unsupported result filter: {result}")
+
+    if page < 1:
+        raise ValueError("page must be >= 1")
+    if days_per_page < 1:
+        raise ValueError("days_per_page must be >= 1")
+
+    team_db_id = _resolve_team_db_id_for_league(
+        db,
+        league_id=league_id,
+        team_provider_id=team_provider_id,
+    )
+    if team_provider_id is not None and team_db_id is None:
+        return {
+            "league_code": normalized_league,
+            "items": [],
+            "page": page,
+            "days_per_page": days_per_page,
+            "total_days": 0,
+            "total_pages": 0,
+            "has_more": False,
+            "has_prev": False,
+        }
+
+    base_stmt = _consensus_results_base_stmt(
+        league_id=league_id,
+        team_db_id=team_db_id,
+        result=result,
+        game_date_from=game_date_from,
+        game_date_to=game_date_to,
+    )
+
+    total_days = _count_distinct_result_days(db, base_stmt)
+    if total_days == 0:
+        return {
+            "league_code": normalized_league,
+            "items": [],
+            "page": page,
+            "days_per_page": days_per_page,
+            "total_days": 0,
+            "total_pages": 0,
+            "has_more": False,
+            "has_prev": False,
+        }
+
+    total_pages = math.ceil(total_days / days_per_page)
+    offset = (page - 1) * days_per_page
+    day_keys = _fetch_result_day_keys(
+        db,
+        base_stmt,
+        days_per_page=days_per_page,
+        offset=offset,
+    )
+
+    if not day_keys:
+        return {
+            "league_code": normalized_league,
+            "items": [],
+            "page": page,
+            "days_per_page": days_per_page,
+            "total_days": total_days,
+            "total_pages": total_pages,
+            "has_more": False,
+            "has_prev": page > 1,
+        }
+
+    game_ids = _fetch_consensus_game_ids_for_days(db, base_stmt, day_keys=day_keys)
+    rows = _query_prediction_rows_for_game_ids(
+        db,
+        league_id=league_id,
+        game_ids=game_ids,
+    )
+    games = _aggregate_predicted_games(rows, league_code=normalized_league)
+
+    games_by_day: dict[dt.date, list[dict[str, Any]]] = defaultdict(list)
+    for game in games:
+        game_date = _game_date_value(game)
+        if game_date is None:
+            continue
+        games_by_day[game_date].append(game)
+
+    items: list[dict[str, Any]] = []
+    for game_date in day_keys:
+        day_games = sorted(
+            games_by_day.get(game_date, []),
+            key=lambda row: (_scheduled_time_value(row), int(row["game_id"])),
+        )
+        resolved_games = [game for game in day_games if game.get("consensus_correct") is not None]
+        resolved_count = len(resolved_games)
+        correct_count = sum(1 for game in resolved_games if game.get("consensus_correct") is True)
+        accuracy_pct = round((correct_count / resolved_count) * 100.0, 2) if resolved_count > 0 else None
+
+        items.append(
+            {
+                "game_date": game_date,
+                "games_count": len(day_games),
+                "resolved_count": resolved_count,
+                "correct_count": correct_count,
+                "accuracy_pct": accuracy_pct,
+                "games": day_games,
+            }
+        )
+
+    return {
+        "league_code": normalized_league,
+        "items": items,
+        "page": page,
+        "days_per_page": days_per_page,
+        "total_days": total_days,
+        "total_pages": total_pages,
+        "has_more": page < total_pages,
+        "has_prev": page > 1,
+    }
+
+
 def list_recent_result_days(
     db: Session,
     league_code: str,
@@ -570,8 +853,9 @@ def list_recent_result_days(
     day_rows: list[dict[str, Any]] = []
     for game_date in sorted(grouped.keys(), reverse=True)[:days]:
         games = sorted(grouped[game_date], key=lambda row: (_scheduled_time_value(row), int(row["game_id"])))
-        resolved_count = sum(int(game.get("resolved_count") or 0) for game in games)
-        correct_count = sum(int(game.get("correct_count") or 0) for game in games)
+        resolved_games = [game for game in games if game.get("consensus_correct") is not None]
+        resolved_count = len(resolved_games)
+        correct_count = sum(1 for game in resolved_games if game.get("consensus_correct") is True)
         accuracy_pct = round((correct_count / resolved_count) * 100.0, 2) if resolved_count > 0 else None
         day_rows.append(
             {

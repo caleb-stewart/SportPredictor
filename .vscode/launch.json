@@ -1,0 +1,61 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API: FastAPI (uvicorn)",
+      "type": "python",
+      "request": "launch",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "module": "uvicorn",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "3141"
+      ],
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "preLaunchTask": "API: Alembic upgrade head"
+    },
+    {
+      "name": "API: FastAPI (uvicorn, reload)",
+      "type": "python",
+      "request": "launch",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "module": "uvicorn",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "3141",
+        "--reload"
+      ],
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "preLaunchTask": "API: Alembic upgrade head"
+    },
+    {
+      "name": "UI: Vue (Vite)",
+      "type": "node-terminal",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/../sport-predictor-vue",
+      "command": "npm run dev -- --host --port 5173"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack: API + UI",
+      "configurations": [
+        "API: FastAPI (uvicorn)",
+        "UI: Vue (Vite)"
+      ],
+      "stopAll": true
+    }
+  ]
+}

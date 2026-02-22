@@ -93,6 +93,17 @@ class PredictionPageResponse(BaseModel):
     has_more: bool
 
 
+class PredictionResultsByDayPageResponse(BaseModel):
+    league_code: str
+    items: list[RecentResultDayResponse]
+    page: int
+    days_per_page: int
+    total_days: int
+    total_pages: int
+    has_more: bool
+    has_prev: bool
+
+
 class NextSlateResponse(BaseModel):
     league_code: str
     as_of_date: dt.date
@@ -150,3 +161,27 @@ class LeagueGameDetailResponse(BaseModel):
     consensus_predicted_winner_provider_team_id: Optional[int]
     consensus_predicted_winner_name: Optional[str]
     consensus_correct: Optional[bool]
+
+
+class MaintenanceRunResponse(BaseModel):
+    run_id: str
+    league_code: str
+    trigger_source: str
+    status: str
+    from_date: Optional[dt.date]
+    to_date: Optional[dt.date]
+    days_attempted: int
+    days_succeeded: int
+    totals_json: dict[str, int]
+    error_text: Optional[str]
+    started_at: dt.datetime
+    completed_at: Optional[dt.datetime]
+
+
+class LeagueMaintenanceStatusResponse(BaseModel):
+    league_code: str
+    enabled: bool
+    max_catchup_days: int
+    checkpoint_date: Optional[dt.date]
+    last_successful_run_id: Optional[str]
+    latest_run: Optional[MaintenanceRunResponse]

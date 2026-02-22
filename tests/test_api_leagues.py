@@ -117,6 +117,118 @@ def test_league_teams_endpoint_returns_normalized_team_payload(monkeypatch):
     assert {"db_team_id", "provider_team_id", "logo_url", "name"} <= set(team.keys())
 
 
+def test_maintenance_status_endpoint_returns_payload(monkeypatch):
+    from api.routes import leagues as leagues_route
+
+    monkeypatch.setattr(
+        leagues_route,
+        "get_maintenance_status",
+        lambda **_kwargs: {
+            "league_code": "whl",
+            "enabled": True,
+            "max_catchup_days": 14,
+            "checkpoint_date": dt.date(2026, 2, 21),
+            "last_successful_run_id": "0cfd0789-1668-42f0-b0d7-f41ce8f32529",
+            "latest_run": {
+                "run_id": "0cfd0789-1668-42f0-b0d7-f41ce8f32529",
+                "league_code": "whl",
+                "trigger_source": "manual",
+                "status": "completed",
+                "from_date": dt.date(2026, 2, 20),
+                "to_date": dt.date(2026, 2, 21),
+                "days_attempted": 2,
+                "days_succeeded": 2,
+                "totals_json": {
+                    "schedule_rows": 8,
+                    "completed_rows": 6,
+                    "rolling_rows": 144,
+                    "predictions_written": 9,
+                    "skipped_games": 1,
+                },
+                "error_text": None,
+                "started_at": dt.datetime(2026, 2, 21, 18, 30, 0),
+                "completed_at": dt.datetime(2026, 2, 21, 18, 33, 0),
+            },
+        },
+    )
+
+    app.dependency_overrides[get_db] = _fake_get_db
+    client = TestClient(app)
+    try:
+        response = client.get("/leagues/whl/maintenance/status")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["league_code"] == "whl"
+    assert body["enabled"] is True
+    assert body["checkpoint_date"] == "2026-02-21"
+    assert body["latest_run"]["days_succeeded"] == 2
+
+
+def test_maintenance_refresh_endpoint_returns_403_when_disabled(monkeypatch):
+    from api.routes import leagues as leagues_route
+
+    def _raise_disabled(**_kwargs):
+        raise leagues_route.MaintenanceRefreshDisabledError("Local maintenance refresh is disabled.")
+
+    monkeypatch.setattr(leagues_route, "run_catchup_maintenance", _raise_disabled)
+
+    app.dependency_overrides[get_db] = _fake_get_db
+    client = TestClient(app)
+    try:
+        response = client.post("/leagues/whl/maintenance/refresh")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert "disabled" in response.json()["detail"].lower()
+
+
+def test_maintenance_refresh_endpoint_returns_run_payload(monkeypatch):
+    from api.routes import leagues as leagues_route
+
+    monkeypatch.setattr(
+        leagues_route,
+        "run_catchup_maintenance",
+        lambda **_kwargs: {
+            "run_id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
+            "league_code": "ohl",
+            "trigger_source": "manual",
+            "status": "completed",
+            "from_date": dt.date(2026, 2, 20),
+            "to_date": dt.date(2026, 2, 21),
+            "days_attempted": 2,
+            "days_succeeded": 2,
+            "totals_json": {
+                "schedule_rows": 12,
+                "completed_rows": 10,
+                "rolling_rows": 180,
+                "predictions_written": 12,
+                "skipped_games": 0,
+            },
+            "error_text": None,
+            "started_at": dt.datetime(2026, 2, 21, 20, 0, 0),
+            "completed_at": dt.datetime(2026, 2, 21, 20, 4, 0),
+        },
+    )
+
+    app.dependency_overrides[get_db] = _fake_get_db
+    client = TestClient(app)
+    try:
+        response = client.post("/leagues/ohl/maintenance/refresh")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["league_code"] == "ohl"
+    assert body["status"] == "completed"
+    assert body["days_attempted"] == 2
+    assert body["totals_json"]["predictions_written"] == 12
+
+
 def test_predicted_games_endpoint_returns_nested_k_predictions(monkeypatch):
     from api.routes import leagues as leagues_route
 
@@ -224,6 +336,49 @@ def test_prediction_results_endpoint_returns_paged_items(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["items"][0]["consensus_correct"] is False
+
+
+def test_prediction_results_by_day_endpoint_returns_grouped_items(monkeypatch):
+    from api.routes import leagues as leagues_route
+
+    monkeypatch.setattr(
+        leagues_route,
+        "list_prediction_results_by_day",
+        lambda **_kwargs: {
+            "league_code": "whl",
+            "items": [
+                {
+                    "game_date": dt.date(2026, 2, 21),
+                    "games_count": 1,
+                    "resolved_count": 1,
+                    "correct_count": 1,
+                    "accuracy_pct": 100.0,
+                    "games": [_sample_predicted_game(consensus_correct=True)],
+                }
+            ],
+            "page": 1,
+            "days_per_page": 3,
+            "total_days": 5,
+            "total_pages": 2,
+            "has_more": True,
+            "has_prev": False,
+        },
+    )
+
+    app.dependency_overrides[get_db] = _fake_get_db
+    client = TestClient(app)
+    try:
+        response = client.get("/leagues/whl/predictions/results/by-day?page=1&days_per_page=3")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["page"] == 1
+    assert body["days_per_page"] == 3
+    assert body["total_days"] == 5
+    assert body["items"][0]["game_date"] == "2026-02-21"
+    assert body["items"][0]["games"][0]["game_id"] == 1022738
 
 
 def test_recent_result_days_endpoint_returns_grouped_days(monkeypatch):

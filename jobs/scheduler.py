@@ -12,6 +12,7 @@ from db.models import ChlLeague
 from db.session import SessionLocal
 from services.data_backend import CHL_LEAGUES
 from services.model_compare import run_model_compare
+from services.maintenance import record_scheduler_maintenance_success
 from services.prediction_pipeline import (
     recompute_rolling_averages,
     run_upcoming_predictions,
@@ -81,6 +82,24 @@ def _job_predict_upcoming(db, league_code: str):
     target = dt.date.today() + dt.timedelta(days=1)
     stats = run_upcoming_predictions(db, target, league_code=league_code)
     logger.info("%s upcoming predictions done: %s", league_code, stats)
+    try:
+        checkpoint = record_scheduler_maintenance_success(
+            db,
+            league_code=league_code,
+            run_date=dt.date.today(),
+            totals={
+                "predictions_written": int(stats.predictions_written),
+                "skipped_games": int(stats.skipped_games),
+            },
+        )
+        logger.info(
+            "%s maintenance checkpoint advanced (run_id=%s to_date=%s)",
+            league_code,
+            checkpoint["run_id"],
+            checkpoint["to_date"],
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("%s failed to record maintenance checkpoint", league_code)
 
 
 def _job_weekly_compare(db, league_code: str):

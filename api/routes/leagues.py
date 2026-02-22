@@ -9,13 +9,23 @@ from db.session import get_db
 from schemas.leagues import (
     DailyReportDetailResponse,
     DailyReportSummaryResponse,
+    LeagueMaintenanceStatusResponse,
     LeagueGameDetailResponse,
     LeagueResponse,
     LeagueTeamResponse,
+    MaintenanceRunResponse,
     NextSlateResponse,
+    PredictionResultsByDayPageResponse,
     PredictionPageResponse,
     PredictedGameResponse,
     RecentResultDaysResponse,
+)
+from services.maintenance import (
+    MaintenanceError,
+    MaintenanceRefreshDisabledError,
+    MaintenanceRunFailedError,
+    get_maintenance_status,
+    run_catchup_maintenance,
 )
 from services.leagues import (
     DailyReportNotFoundError,
@@ -27,6 +37,7 @@ from services.leagues import (
     list_daily_reports,
     list_league_teams,
     list_prediction_results,
+    list_prediction_results_by_day,
     list_predicted_games,
     list_recent_result_days,
     list_supported_leagues,
@@ -53,6 +64,41 @@ def league_teams(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return [LeagueTeamResponse.model_validate(row) for row in rows]
+
+
+@router.get("/{league_code}/maintenance/status", response_model=LeagueMaintenanceStatusResponse)
+def league_maintenance_status(
+    league_code: str,
+    db: Session = Depends(get_db),
+) -> LeagueMaintenanceStatusResponse:
+    try:
+        payload = get_maintenance_status(db=db, league_code=league_code)
+    except MaintenanceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return LeagueMaintenanceStatusResponse.model_validate(payload)
+
+
+@router.post("/{league_code}/maintenance/refresh", response_model=MaintenanceRunResponse)
+def league_maintenance_refresh(
+    league_code: str,
+    db: Session = Depends(get_db),
+) -> MaintenanceRunResponse:
+    try:
+        payload = run_catchup_maintenance(
+            db=db,
+            league_code=league_code,
+            trigger_source="manual",
+            include_training=False,
+        )
+    except MaintenanceRefreshDisabledError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except MaintenanceRunFailedError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except MaintenanceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return MaintenanceRunResponse.model_validate(payload)
 
 
 @router.get("/{league_code}/predicted-games", response_model=list[PredictedGameResponse])
@@ -171,6 +217,36 @@ def league_predictions_results(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return PredictionPageResponse.model_validate(payload)
+
+
+@router.get("/{league_code}/predictions/results/by-day", response_model=PredictionResultsByDayPageResponse)
+def league_predictions_results_by_day(
+    league_code: str,
+    game_date_from: dt.date | None = Query(default=None),
+    game_date_to: dt.date | None = Query(default=None),
+    team_provider_id: int | None = Query(default=None),
+    result: str = Query(default="all", description="One of: all, correct, incorrect"),
+    page: int = Query(default=1, ge=1),
+    days_per_page: int = Query(default=3, ge=1, le=31),
+    db: Session = Depends(get_db),
+) -> PredictionResultsByDayPageResponse:
+    try:
+        payload = list_prediction_results_by_day(
+            db=db,
+            league_code=league_code,
+            game_date_from=game_date_from,
+            game_date_to=game_date_to,
+            team_provider_id=team_provider_id,
+            result=result,
+            page=page,
+            days_per_page=days_per_page,
+        )
+    except UnknownLeagueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return PredictionResultsByDayPageResponse.model_validate(payload)
 
 
 @router.get("/{league_code}/predictions/results/recent-days", response_model=RecentResultDaysResponse)

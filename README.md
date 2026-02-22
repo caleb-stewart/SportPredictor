@@ -49,6 +49,8 @@ Recommended defaults are in `.env.example`.
 Runtime flags:
 - `DATA_BACKEND=chl`
 - `DEFAULT_LEAGUE_CODE=whl|ohl|lhjmq`
+- `LOCAL_MAINTENANCE_REFRESH_ENABLED=true|false` (manual league refresh API guard)
+- `LOCAL_MAINTENANCE_MAX_CATCHUP_DAYS=14`
 
 ## Database Migrations (Alembic)
 
@@ -72,6 +74,14 @@ Start backend + frontend with migrations and browser open:
 ```bash
 ./start.sh
 ```
+
+VS Code launch (no bash script needed):
+
+1. Open `SportPredictor` in VS Code.
+2. Go to Run and Debug.
+3. Run `Full Stack: API + UI`.
+
+This runs Alembic migrations first, then starts FastAPI on `3141` and Vite on `5173`.
 
 Direct API run:
 
@@ -97,6 +107,8 @@ uvicorn main:app --reload --port 3141
 - `GET /leagues/{league_code}/reports/daily`
 - `GET /leagues/{league_code}/reports/daily/{prediction_date}`
 - `GET /leagues/{league_code}/games/{game_id}`
+- `GET /leagues/{league_code}/maintenance/status`
+- `POST /leagues/{league_code}/maintenance/refresh`
 - `POST /models/compare/run?league_code=whl`
 - `GET /models/compare/report/{run_id}?league_code=whl`
 - `POST /experiments/feature-proposal/run?league_code=whl`
@@ -118,6 +130,13 @@ Manual daily run:
 
 ```bash
 python scripts/run_daily_pipeline.py
+```
+
+Manual local catch-up refresh (league-scoped, guarded by `LOCAL_MAINTENANCE_REFRESH_ENABLED=true`):
+
+```bash
+curl -X POST "http://localhost:3141/leagues/ohl/maintenance/refresh"
+curl "http://localhost:3141/leagues/ohl/maintenance/status"
 ```
 
 Historical CHL backfill (season-based, resumable):

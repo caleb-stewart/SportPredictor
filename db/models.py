@@ -323,6 +323,37 @@ class ChlIngestGameFailure(Base):
     )
 
 
+class ChlMaintenanceRun(Base):
+    __tablename__ = "chl_maintenance_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    league_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chl_leagues.id"), nullable=False)
+    trigger_source: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    from_date: Mapped[Optional[dt.date]] = mapped_column(Date)
+    to_date: Mapped[Optional[dt.date]] = mapped_column(Date)
+    days_attempted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    days_succeeded: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    totals_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    error_text: Mapped[Optional[str]] = mapped_column(String)
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
+    completed_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
+
+
+class ChlMaintenanceCheckpoint(Base):
+    __tablename__ = "chl_maintenance_checkpoints"
+
+    league_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chl_leagues.id"), primary_key=True)
+    last_successful_run_date: Mapped[Optional[dt.date]] = mapped_column(Date)
+    last_successful_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("chl_maintenance_runs.id"),
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
+
+
 Index(
     "idx_chl_prediction_records_archive_archive_run_id",
     ChlPredictionRecordArchive.archive_run_id,
@@ -341,3 +372,5 @@ Index("idx_chl_experiments_status", ChlExperiment.status)
 Index("idx_chl_ingest_runs_league_status_started_at", ChlIngestRun.league_id, ChlIngestRun.status, ChlIngestRun.started_at)
 Index("idx_chl_ingest_failures_run_id", ChlIngestGameFailure.run_id)
 Index("idx_chl_ingest_failures_league_game", ChlIngestGameFailure.league_id, ChlIngestGameFailure.game_id)
+Index("idx_chl_maintenance_runs_league_started_at", ChlMaintenanceRun.league_id, ChlMaintenanceRun.started_at)
+Index("idx_chl_maintenance_runs_status_completed_at", ChlMaintenanceRun.status, ChlMaintenanceRun.completed_at)

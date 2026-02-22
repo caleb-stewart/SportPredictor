@@ -35,6 +35,8 @@ class Settings(BaseSettings):
 
     scheduler_enabled: bool = True
     scheduler_timezone: str = "America/Los_Angeles"
+    local_maintenance_refresh_enabled: bool = Field(default=False, alias="LOCAL_MAINTENANCE_REFRESH_ENABLED")
+    local_maintenance_max_catchup_days: int = Field(default=14, alias="LOCAL_MAINTENANCE_MAX_CATCHUP_DAYS")
 
     model_store_root: str = str(Path(__file__).resolve().parents[1] / "model_store" / "whl_v2")
     active_model_file: str = "active_model.json"
