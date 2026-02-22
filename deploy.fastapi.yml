@@ -20,9 +20,19 @@ env:
     API_PORT: 3141
     SCHEDULER_ENABLED: "true"
     SCHEDULER_TIMEZONE: America/Los_Angeles
+    DATA_BACKEND: chl
+    DUAL_WRITE: "false"
+    DEFAULT_LEAGUE_CODE: whl
+    CHL_INGEST_MAX_WORKERS: "6"
+    CHL_INGEST_RPS_LIMIT: "4"
+    CHL_INGEST_RETRY_MAX: "5"
+    CHL_INGEST_TIMEOUT_SECONDS: "30"
   secret:
     - DATABASE_URL
     - HOCKEYTECH_API
+    - HOCKEYTECH_API_KEY_WHL
+    - HOCKEYTECH_API_KEY_OHL
+    - HOCKEYTECH_API_KEY_LHJMQ
 
 aliases:
   shell: app exec --interactive --reuse "bash"

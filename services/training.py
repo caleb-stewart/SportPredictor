@@ -67,7 +67,7 @@ def _stage_pending_candidate(details: dict[str, Any]) -> None:
 
     pending_payload = {
         "model_version": version,
-        "model_family": "whl_v2_hybrid_logistic_stacker",
+        "model_family": details.get("model_family") or "whl_v3_hybrid_branch_stacker",
         "metadata_path": str(metadata_path),
         "bundle_path": str(bundle_path),
         "metrics_path": str(metrics_path),
@@ -113,7 +113,12 @@ def _promote_from_pending_if_present(details: dict[str, Any]) -> dict[str, Any]:
     return details
 
 
-def _run_training(promote: bool) -> dict[str, Any]:
+def _league_model_store_root(league_code: str) -> Path:
+    root = Path(settings.model_store_root).resolve()
+    return (root / league_code).resolve()
+
+
+def _run_training(promote: bool, league_code: str) -> dict[str, Any]:
     db_url = make_url(settings.database_url)
     db = DbConfig(
         host=db_url.host or "localhost",
@@ -124,7 +129,7 @@ def _run_training(promote: bool) -> dict[str, Any]:
     )
 
     config = TrainerConfig(
-        output_root=Path(settings.model_store_root).resolve(),
+        output_root=_league_model_store_root(league_code),
         model_version=None,
         no_promote=not promote,
         export_dataset_path=None,
@@ -135,6 +140,7 @@ def _run_training(promote: bool) -> dict[str, Any]:
         meta_cv_splits=5,
         min_train_size=600,
         db=db,
+        league_code=league_code,
     )
 
     try:
@@ -153,9 +159,10 @@ def _run_training(promote: bool) -> dict[str, Any]:
     return details
 
 
-def train_and_maybe_promote(promote: bool = True) -> dict[str, Any]:
-    details = _run_training(promote=False)
+def train_and_maybe_promote(promote: bool = True, league_code: str = "whl") -> dict[str, Any]:
+    details = _run_training(promote=False, league_code=league_code)
     _stage_pending_candidate(details)
+    details["league_code"] = league_code
 
     if promote and bool(details.get("ok")) and bool((details.get("gates") or {}).get("all_passed")):
         details = _promote_from_pending_if_present(details)
@@ -166,8 +173,8 @@ def train_and_maybe_promote(promote: bool = True) -> dict[str, Any]:
     return details
 
 
-def promote_staged_model() -> dict[str, Any]:
-    root = Path(settings.model_store_root).resolve()
+def promote_staged_model(league_code: str = "whl") -> dict[str, Any]:
+    root = _league_model_store_root(league_code)
     pending_path = root / "pending_model.json"
     if not pending_path.exists():
         return {"ok": False, "promoted": False, "reason": "no staged model found"}

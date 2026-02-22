@@ -14,20 +14,34 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, roc_auc_score
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from services.context_features import CONTEXT_FEATURE_COLUMNS
 from services.training_dataset import (
     DbConfig,
     export_dataset_csv,
     games_with_full_k_coverage,
     load_canonical_dataset,
 )
-from services.training_features import FEATURE_COLUMNS, K_VALUES
+from services.training_features import (
+    FEATURE_COLUMNS,
+    GOALS_BRANCH_FEATURE_COLUMNS,
+    K_VALUES,
+    META_INPUT_COLUMNS_V3,
+)
+
+try:
+    from catboost import CatBoostClassifier
+
+    CATBOOST_AVAILABLE = True
+except Exception:  # noqa: BLE001
+    CatBoostClassifier = None
+    CATBOOST_AVAILABLE = False
 
 
 @dataclass(frozen=True)
@@ -59,6 +73,7 @@ class TrainerConfig:
     meta_cv_splits: int
     min_train_size: int
     db: DbConfig
+    league_code: str = "whl"
 
 
 def compute_metrics(y_true: np.ndarray, probabilities: np.ndarray) -> HoldoutMetrics:
@@ -132,8 +147,8 @@ def choose_best_model(metrics: dict[str, HoldoutMetrics]) -> tuple[str, HoldoutM
     winner_name = max(
         metrics,
         key=lambda key: (
-            metrics[key].accuracy,
             -metrics[key].log_loss,
+            metrics[key].accuracy,
             -metrics[key].brier,
         ),
     )
@@ -158,6 +173,25 @@ def time_series_oof_for_estimator(
         model.fit(X[train_idx], y[train_idx])
         oof[valid_idx] = model.predict_proba(X[valid_idx])[:, 1]
 
+    return oof
+
+
+def time_series_oof_regression(
+    estimator: Any,
+    X: np.ndarray,
+    y: np.ndarray,
+    n_splits: int,
+    min_train_size: int,
+) -> np.ndarray:
+    splitter = TimeSeriesSplit(n_splits=n_splits)
+    oof = np.full(shape=(len(y),), fill_value=np.nan, dtype=float)
+
+    for train_idx, valid_idx in splitter.split(X):
+        if len(train_idx) < min_train_size:
+            continue
+        model = clone(estimator)
+        model.fit(X[train_idx], y[train_idx])
+        oof[valid_idx] = model.predict(X[valid_idx])
     return oof
 
 
@@ -199,10 +233,22 @@ def prepare_stack_frames(dataset: pd.DataFrame):
     if full.empty:
         raise RuntimeError("No games have complete k=5/10/15 feature coverage.")
 
+    anchor_cols = [
+        "game_id",
+        "game_date",
+        "season_id",
+        "home_win",
+        "home_team_id",
+        "away_team_id",
+        "home_goal_count",
+        "away_goal_count",
+        *CONTEXT_FEATURE_COLUMNS,
+        "strength_adjusted_goals_diff",
+        "strength_adjusted_sog_diff",
+    ]
+    present_anchor_cols = [col for col in anchor_cols if col in full.columns]
     anchor = (
-        full[full["k_value"] == 15][
-            ["game_id", "game_date", "season_id", "home_win", "home_team_id", "away_team_id"]
-        ]
+        full[full["k_value"] == 15][present_anchor_cols]
         .drop_duplicates(subset=["game_id"])
         .sort_values(["game_date", "game_id"])
         .reset_index(drop=True)
@@ -218,11 +264,34 @@ def prepare_stack_frames(dataset: pd.DataFrame):
             .set_index("game_id")
             .loc[game_ids]
         )
-        x_by_k[k] = k_frame.to_numpy(dtype=float)
+        x_by_k[k] = k_frame.fillna(0.0).to_numpy(dtype=float)
 
     y = anchor["home_win"].to_numpy(dtype=int)
+    y_goal_diff = (
+        anchor["home_goal_count"].to_numpy(dtype=float) - anchor["away_goal_count"].to_numpy(dtype=float)
+        if {"home_goal_count", "away_goal_count"} <= set(anchor.columns)
+        else np.zeros(shape=(len(anchor),), dtype=float)
+    )
+    context_cols_present = [col for col in CONTEXT_FEATURE_COLUMNS if col in anchor.columns]
+    if context_cols_present:
+        x_context = anchor[context_cols_present].fillna(0.0).to_numpy(dtype=float)
+    else:
+        x_context = np.zeros(shape=(len(anchor), 0), dtype=float)
+
+    goals_cols_present = [col for col in GOALS_BRANCH_FEATURE_COLUMNS if col in full.columns]
+    if goals_cols_present:
+        goals_frame = (
+            full[full["k_value"] == 15][["game_id", *goals_cols_present]]
+            .drop_duplicates(subset=["game_id"])
+            .set_index("game_id")
+            .loc[game_ids]
+        )
+        x_goals = goals_frame.fillna(0.0).to_numpy(dtype=float)
+    else:
+        x_goals = np.zeros(shape=(len(anchor), 0), dtype=float)
+
     seasons = anchor["season_id"].to_numpy()
-    return anchor, x_by_k, y, seasons
+    return anchor, x_by_k, x_context, context_cols_present, x_goals, goals_cols_present, y, y_goal_diff, seasons
 
 
 def save_model_artifacts(
@@ -262,14 +331,24 @@ def save_model_artifacts(
 
 
 def train_model_package(config: TrainerConfig) -> tuple[dict[str, Any], int]:
-    dataset = load_canonical_dataset(config.db)
+    dataset = load_canonical_dataset(config.db, league_code=config.league_code)
     if dataset.empty:
         raise RuntimeError("Canonical dataset is empty. Cannot train model.")
 
     if config.export_dataset_path:
         export_dataset_csv(config.export_dataset_path, dataset)
 
-    anchor, x_by_k, y, seasons = prepare_stack_frames(dataset)
+    (
+        anchor,
+        x_by_k,
+        x_context,
+        context_feature_columns,
+        x_goals,
+        goals_feature_columns,
+        y,
+        y_goal_diff,
+        seasons,
+    ) = prepare_stack_frames(dataset)
 
     split_idx = int(len(anchor) * 0.8)
     if split_idx <= config.min_train_size:
@@ -278,9 +357,11 @@ def train_model_package(config: TrainerConfig) -> tuple[dict[str, Any], int]:
     y_train = y[:split_idx]
     y_holdout = y[split_idx:]
     seasons_holdout = seasons[split_idx:]
+    y_goal_train = y_goal_diff[:split_idx]
 
     base_holdout_metrics: dict[str, dict[str, float]] = {}
     challenger_holdout_metrics: dict[str, dict[str, float]] = {}
+    catboost_holdout_metrics: dict[str, dict[str, float] | str] = {}
     oof_by_k: dict[int, np.ndarray] = {}
     base_models: dict[int, Pipeline] = {}
     holdout_probs_by_k: dict[int, np.ndarray] = {}
@@ -316,7 +397,97 @@ def train_model_package(config: TrainerConfig) -> tuple[dict[str, Any], int]:
         challenger_probs = challenger.predict_proba(x_holdout)[:, 1]
         challenger_holdout_metrics[str(k)] = compute_metrics(y_holdout, challenger_probs).as_dict()
 
-    meta_train = np.column_stack([oof_by_k[k] for k in K_VALUES])
+        if CATBOOST_AVAILABLE and CatBoostClassifier is not None:
+            cat = CatBoostClassifier(
+                loss_function="Logloss",
+                eval_metric="Logloss",
+                depth=6,
+                learning_rate=0.05,
+                iterations=500,
+                random_seed=42,
+                verbose=False,
+            )
+            cat.fit(x_train, y_train)
+            cat_probs = cat.predict_proba(x_holdout)[:, 1]
+            catboost_holdout_metrics[str(k)] = compute_metrics(y_holdout, cat_probs).as_dict()
+        else:
+            catboost_holdout_metrics[str(k)] = "catboost unavailable"
+
+    rating_model: Pipeline | None = None
+    rating_oof: np.ndarray | None = None
+    rating_holdout_probs: np.ndarray | None = None
+    rating_holdout_metrics: dict[str, float] | None = None
+    if x_context.shape[1] > 0:
+        x_context_train = x_context[:split_idx]
+        x_context_holdout = x_context[split_idx:]
+        rating_model = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                ("clf", LogisticRegression(max_iter=2000, random_state=42)),
+            ]
+        )
+        rating_oof = time_series_oof_probabilities(
+            X=x_context_train,
+            y=y_train,
+            n_splits=config.base_oof_splits,
+            min_train_size=config.min_train_size,
+        )
+        rating_model.fit(x_context_train, y_train)
+        rating_holdout_probs = rating_model.predict_proba(x_context_holdout)[:, 1]
+        rating_holdout_metrics = compute_metrics(y_holdout, rating_holdout_probs).as_dict()
+
+    goals_regressor: HistGradientBoostingRegressor | None = None
+    goals_calibrator: LogisticRegression | None = None
+    goals_oof_prob: np.ndarray | None = None
+    goals_holdout_prob: np.ndarray | None = None
+    goals_holdout_metrics: dict[str, float] | None = None
+    if x_goals.shape[1] > 0:
+        x_goals_train = x_goals[:split_idx]
+        x_goals_holdout = x_goals[split_idx:]
+
+        goals_regressor = HistGradientBoostingRegressor(
+            learning_rate=0.05,
+            max_iter=400,
+            max_depth=6,
+            min_samples_leaf=30,
+            random_state=42,
+        )
+        oof_goal_diff = time_series_oof_regression(
+            estimator=goals_regressor,
+            X=x_goals_train,
+            y=y_goal_train,
+            n_splits=config.base_oof_splits,
+            min_train_size=config.min_train_size,
+        )
+        valid_goal_mask = ~np.isnan(oof_goal_diff)
+        if valid_goal_mask.any():
+            goals_calibrator = LogisticRegression(max_iter=1000, random_state=42)
+            goals_calibrator.fit(oof_goal_diff[valid_goal_mask].reshape(-1, 1), y_train[valid_goal_mask])
+            goals_oof_prob = np.full(shape=(len(y_train),), fill_value=np.nan, dtype=float)
+            goals_oof_prob[valid_goal_mask] = goals_calibrator.predict_proba(
+                oof_goal_diff[valid_goal_mask].reshape(-1, 1)
+            )[:, 1]
+
+            goals_regressor.fit(x_goals_train, y_goal_train)
+            holdout_goal_diff = goals_regressor.predict(x_goals_holdout).reshape(-1, 1)
+            goals_holdout_prob = goals_calibrator.predict_proba(holdout_goal_diff)[:, 1]
+            goals_holdout_metrics = compute_metrics(y_holdout, goals_holdout_prob).as_dict()
+
+    meta_train_columns: list[np.ndarray] = [oof_by_k[k] for k in K_VALUES]
+    meta_holdout_columns: list[np.ndarray] = [holdout_probs_by_k[k] for k in K_VALUES]
+    meta_input_columns: list[str] = [f"p_k_{k}" for k in K_VALUES]
+
+    if rating_oof is not None and rating_holdout_probs is not None:
+        meta_train_columns.append(rating_oof)
+        meta_holdout_columns.append(rating_holdout_probs)
+        meta_input_columns.append("p_rating")
+
+    if goals_oof_prob is not None and goals_holdout_prob is not None:
+        meta_train_columns.append(goals_oof_prob)
+        meta_holdout_columns.append(goals_holdout_prob)
+        meta_input_columns.append("p_goals")
+
+    meta_train = np.column_stack(meta_train_columns)
     valid_meta_mask = ~np.isnan(meta_train).any(axis=1)
     meta_train = meta_train[valid_meta_mask]
     y_meta_train = y_train[valid_meta_mask]
@@ -324,7 +495,7 @@ def train_model_package(config: TrainerConfig) -> tuple[dict[str, Any], int]:
     if len(y_meta_train) < config.min_train_size:
         raise RuntimeError("Insufficient valid OOF rows for stacker training.")
 
-    meta_holdout = np.column_stack([holdout_probs_by_k[k] for k in K_VALUES])
+    meta_holdout = np.column_stack(meta_holdout_columns)
 
     stacker_models: dict[str, Any] = {}
     stacker_holdout_metrics: dict[str, HoldoutMetrics] = {}
@@ -387,6 +558,11 @@ def train_model_package(config: TrainerConfig) -> tuple[dict[str, Any], int]:
             "value": chosen_metrics.log_loss,
             "baseline": baseline_metrics.log_loss,
         },
+        "baseline_brier_gate": {
+            "passed": chosen_metrics.brier < baseline_metrics.brier,
+            "value": chosen_metrics.brier,
+            "baseline": baseline_metrics.brier,
+        },
     }
     gates["all_passed"] = all(gate["passed"] for gate in gates.values() if isinstance(gate, dict))
 
@@ -394,13 +570,18 @@ def train_model_package(config: TrainerConfig) -> tuple[dict[str, Any], int]:
     version = config.model_version or now_utc.strftime("%Y%m%dT%H%M%SZ")
 
     bundle = {
-        "model_family": "whl_v2_hybrid_logistic_stacker",
+        "model_family": "whl_v3_hybrid_branch_stacker",
         "model_version": version,
         "trained_at_utc": now_utc.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "k_values": list(K_VALUES),
         "feature_columns": list(FEATURE_COLUMNS),
-        "meta_input_columns": [f"p_k_{k}" for k in K_VALUES],
+        "meta_input_columns": list(meta_input_columns),
         "base_models": {str(k): model for k, model in base_models.items()},
+        "rating_model": rating_model,
+        "rating_feature_columns": list(context_feature_columns),
+        "goals_regressor": goals_regressor,
+        "goals_calibrator": goals_calibrator,
+        "goals_feature_columns": list(goals_feature_columns),
         "meta_model": chosen_model,
         "meta_model_name": chosen_name,
     }
@@ -421,6 +602,9 @@ def train_model_package(config: TrainerConfig) -> tuple[dict[str, Any], int]:
         },
         "base_models_holdout": base_holdout_metrics,
         "challenger_holdout": challenger_holdout_metrics,
+        "catboost_challenger_holdout": catboost_holdout_metrics,
+        "rating_branch_holdout": rating_holdout_metrics,
+        "goals_branch_holdout": goals_holdout_metrics,
         "stacker_candidates_holdout": {
             name: model_metrics.as_dict() for name, model_metrics in stacker_holdout_metrics.items()
         },
@@ -429,7 +613,7 @@ def train_model_package(config: TrainerConfig) -> tuple[dict[str, Any], int]:
         },
         "chosen_model": {
             "name": chosen_name,
-            "selection_metric": "time_cv_accuracy_then_log_loss",
+            "selection_metric": "time_cv_log_loss_then_accuracy",
             "time_cv": chosen_cv_metrics.as_dict(),
             **chosen_metrics.as_dict(),
         },
@@ -451,6 +635,7 @@ def train_model_package(config: TrainerConfig) -> tuple[dict[str, Any], int]:
         "version": version,
         "output_dir": str(version_dir),
         "promoted": should_promote,
+        "model_family": bundle["model_family"],
         "gates": gates,
         "chosen_model": metrics["chosen_model"],
     }
@@ -475,6 +660,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db-name", default=None)
     parser.add_argument("--db-user", default=None)
     parser.add_argument("--db-password", default=None)
+    parser.add_argument("--league-code", default="whl")
     return parser.parse_args()
 
 
@@ -501,6 +687,7 @@ def main() -> int:
         meta_cv_splits=int(args.meta_cv_splits),
         min_train_size=int(args.min_train_size),
         db=db,
+        league_code=str(args.league_code or "whl"),
     )
 
     details, code = train_model_package(config)

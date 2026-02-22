@@ -1,0 +1,34 @@
+{
+  "base_feature_count": 45,
+  "baseline_metrics": {
+    "accuracy": 0.6478608368594264,
+    "auc": 0.696535689374564,
+    "brier": 0.21954409993186866,
+    "log_loss": 0.6292061198629412
+  },
+  "candidate_feature_count": 46,
+  "candidate_metrics": {
+    "accuracy": 0.6466854724964739,
+    "auc": 0.696222420734468,
+    "brier": 0.21972616092136202,
+    "log_loss": 0.6297791187444737
+  },
+  "delta_new_minus_old": {
+    "accuracy": -0.0011753643629525135,
+    "brier": 0.00018206098949336003,
+    "log_loss": 0.0005729988815325049
+  },
+  "derived_features": [
+    "elo_rest_interaction"
+  ],
+  "proposal_name": "smoke_strength_combo",
+  "rows": 21270,
+  "split_holdout": 4254,
+  "split_train": 17016,
+  "verdict": {
+    "accepted": false,
+    "accuracy_improved": false,
+    "brier_improved": false,
+    "log_loss_improved": false
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "active_model_version": "20260222T002228Z",
+  "counts": {
+    "games_predicted": 1495,
+    "games_scanned": 1500,
+    "games_skipped": 5,
+    "paired_rows": 0,
+    "rows_upserted": 4485
+  },
+  "date_from": "2024-09-20",
+  "date_to": "2026-03-22",
+  "generated_at_utc": "2026-02-22T01:29:13Z",
+  "last_n_games": 1500,
+  "proof_summary": {
+    "by_k": {},
+    "overall": null,
+    "paired_rows": 0,
+    "pass_criteria": {
+      "accuracy_delta_ci_above_zero": false,
+      "accuracy_improved": false,
+      "log_loss_improved": false,
+      "mcnemar_significant": false
+    },
+    "proved_better": false,
+    "stat_tests": {
+      "bootstrap_accuracy_delta": {
+        "ci95_high": null,
+        "ci95_low": null,
+        "delta_mean": 0.0,
+        "samples": 2000,
+        "seed": 42
+      },
+      "mcnemar": {
+        "b": 0,
+        "c": 0,
+        "method": "degenerate",
+        "n": 0,
+        "p_value": 1.0
+      }
+    }
+  },
+  "proved_better": false,
+  "replay_mode": "frozen_active",
+  "rollback_on_proof_failure": false,
+  "run_id": "5710e670-dc34-4e61-81bf-aa39b26e0eda",
+  "selection_mode": "last_n_completed_games",
+  "skip_reasons": {
+    "team_not_found": 5
+  },
+  "status": "completed"
+}

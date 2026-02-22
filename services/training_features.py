@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from services.context_features import CONTEXT_FEATURE_COLUMNS
+
 BASE_METRICS: list[str] = [
     "goals_for_avg",
     "goals_against_avg",
@@ -24,6 +26,19 @@ K_VALUES: list[int] = [5, 10, 15]
 FEATURE_COLUMNS: list[str] = [
     *(f"{metric}_diff" for metric in BASE_METRICS),
     *(f"{metric}_sum" for metric in BASE_METRICS),
+]
+
+GOALS_BRANCH_FEATURE_COLUMNS: list[str] = [
+    *FEATURE_COLUMNS,
+    *CONTEXT_FEATURE_COLUMNS,
+    "strength_adjusted_goals_diff",
+    "strength_adjusted_sog_diff",
+]
+
+META_INPUT_COLUMNS_V3: list[str] = [
+    *(f"p_k_{k}" for k in K_VALUES),
+    "p_rating",
+    "p_goals",
 ]
 
 

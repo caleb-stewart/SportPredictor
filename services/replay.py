@@ -8,16 +8,16 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
-from sqlalchemy import and_, delete, func, select, tuple_
+from sqlalchemy import and_, delete, desc, func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from core.config import settings
 from db.models import (
-    WhlGame,
-    WhlPredictionRecord,
-    WhlPredictionRecordArchive,
-    WhlReplayRun,
+    ChlGame,
+    ChlPredictionRecord,
+    ChlPredictionRecordArchive,
+    ChlReplayRun,
 )
 from services.feature_builder import (
     InsufficientHistoryError,
@@ -31,6 +31,12 @@ from services.predictor import (
     is_active_model_pointer_unchanged,
     load_frozen_active_model,
     predict_from_payload,
+)
+from services.data_backend import (
+    DataBackendError,
+    primary_store,
+    require_supported_league_code,
+    resolve_league_id_for_store,
 )
 
 
@@ -54,50 +60,125 @@ def _iso_utc_now() -> str:
     return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _completed_game_filters() -> list[Any]:
+def _completed_game_filters(league_id: int) -> list[Any]:
     return [
-        WhlGame.game_date.is_not(None),
-        WhlGame.home_goal_count.is_not(None),
-        WhlGame.away_goal_count.is_not(None),
+        ChlGame.league_id == league_id,
+        ChlGame.game_date.is_not(None),
+        ChlGame.home_goal_count.is_not(None),
+        ChlGame.away_goal_count.is_not(None),
     ]
 
 
-def completed_games_stmt(date_from: dt.date | None = None, date_to: dt.date | None = None):
-    stmt = select(WhlGame).where(*_completed_game_filters())
+def completed_games_stmt(league_id: int, date_from: dt.date | None = None, date_to: dt.date | None = None):
+    stmt = select(ChlGame).where(*_completed_game_filters(league_id))
     if date_from is not None:
-        stmt = stmt.where(WhlGame.game_date >= date_from)
+        stmt = stmt.where(ChlGame.game_date >= date_from)
     if date_to is not None:
-        stmt = stmt.where(WhlGame.game_date <= date_to)
-    return stmt.order_by(WhlGame.game_date.asc(), WhlGame.game_id.asc())
+        stmt = stmt.where(ChlGame.game_date <= date_to)
+    return stmt.order_by(ChlGame.game_date.asc(), ChlGame.game_id.asc())
 
 
-def _prediction_rows_stmt(date_from: dt.date, date_to: dt.date):
+def _prediction_rows_stmt(league_id: int, date_from: dt.date, date_to: dt.date):
     return (
-        select(WhlPredictionRecord)
-        .join(WhlGame, WhlPredictionRecord.game_id == WhlGame.game_id)
-        .where(*_completed_game_filters())
-        .where(WhlGame.game_date >= date_from, WhlGame.game_date <= date_to)
-        .where(WhlPredictionRecord.k_value.in_(K_VALUES))
+        select(ChlPredictionRecord)
+        .join(
+            ChlGame,
+            and_(
+                ChlPredictionRecord.game_id == ChlGame.game_id,
+                ChlPredictionRecord.league_id == ChlGame.league_id,
+            ),
+        )
+        .where(*_completed_game_filters(league_id))
+        .where(ChlGame.game_date >= date_from, ChlGame.game_date <= date_to)
+        .where(ChlPredictionRecord.k_value.in_(K_VALUES))
+    )
+
+
+def _prediction_rows_for_game_ids_stmt(league_id: int, game_ids: list[int]):
+    if not game_ids:
+        return select(ChlPredictionRecord).where(
+            ChlPredictionRecord.league_id == league_id,
+            ChlPredictionRecord.game_id == -1,
+        )
+
+    return (
+        select(ChlPredictionRecord)
+        .where(ChlPredictionRecord.league_id == league_id)
+        .where(ChlPredictionRecord.game_id.in_(game_ids))
+        .where(ChlPredictionRecord.k_value.in_(K_VALUES))
     )
 
 
 def _resolve_date_bounds(
     db: Session,
+    league_id: int,
     date_from: dt.date | None,
     date_to: dt.date | None,
 ) -> tuple[dt.date, dt.date]:
     min_date, max_date = db.execute(
-        select(func.min(WhlGame.game_date), func.max(WhlGame.game_date)).where(*_completed_game_filters())
+        select(func.min(ChlGame.game_date), func.max(ChlGame.game_date)).where(*_completed_game_filters(league_id))
     ).one()
 
     if min_date is None or max_date is None:
-        raise ReplayValidationError("No completed games found in whl_games.")
+        raise ReplayValidationError("No completed games found in chl_games.")
 
     resolved_from = date_from or min_date
     resolved_to = date_to or max_date
     if resolved_from > resolved_to:
         raise ReplayValidationError("date_from cannot be after date_to.")
     return resolved_from, resolved_to
+
+
+def _normalize_selection_mode(selection_mode: str | None) -> str:
+    mode = (selection_mode or "date_range").strip().lower()
+    if mode not in {"date_range", "last_n_completed_games"}:
+        raise ReplayValidationError(f"Unsupported selection_mode: {selection_mode}")
+    return mode
+
+
+def _select_replay_games(
+    db: Session,
+    *,
+    league_id: int,
+    selection_mode: str,
+    date_from: dt.date | None,
+    date_to: dt.date | None,
+    last_n_games: int | None,
+) -> tuple[list[ChlGame], dt.date, dt.date]:
+    if selection_mode == "last_n_completed_games":
+        if date_from is not None or date_to is not None:
+            raise ReplayValidationError("date_from/date_to cannot be used with selection_mode=last_n_completed_games.")
+        if last_n_games is None:
+            raise ReplayValidationError("last_n_games is required when selection_mode=last_n_completed_games.")
+        if last_n_games <= 0:
+            raise ReplayValidationError("last_n_games must be greater than 0.")
+
+        recent_stmt = (
+            select(ChlGame)
+            .where(*_completed_game_filters(league_id))
+            .order_by(desc(ChlGame.game_date), desc(ChlGame.game_id))
+            .limit(last_n_games)
+        )
+        recent_games = db.scalars(recent_stmt).all()
+        if not recent_games:
+            raise ReplayValidationError("No completed games found in chl_games.")
+
+        games = sorted(
+            recent_games,
+            key=lambda game: (
+                game.game_date or dt.date.min,
+                game.game_id,
+            ),
+        )
+        first_date = games[0].game_date
+        last_date = games[-1].game_date
+        if first_date is None or last_date is None:
+            raise ReplayValidationError("Selected replay games are missing game_date.")
+        return games, first_date, last_date
+
+    resolved_from, resolved_to = _resolve_date_bounds(db=db, league_id=league_id, date_from=date_from, date_to=date_to)
+    games = db.scalars(completed_games_stmt(league_id, resolved_from, resolved_to)).all()
+    return games, resolved_from, resolved_to
 
 
 def _chunked(seq: list[Any], size: int = 1000) -> Iterable[list[Any]]:
@@ -107,7 +188,7 @@ def _chunked(seq: list[Any], size: int = 1000) -> Iterable[list[Any]]:
 
 def _archive_rows(
     db: Session,
-    old_rows: list[WhlPredictionRecord],
+    old_rows: list[ChlPredictionRecord],
     run_id: uuid.UUID,
     archive_label: str | None,
 ) -> int:
@@ -117,6 +198,7 @@ def _archive_rows(
     now = dt.datetime.now(dt.UTC)
     values = [
         {
+            "league_id": row.league_id,
             "id": row.id,
             "game_id": row.game_id,
             "k_value": row.k_value,
@@ -141,7 +223,7 @@ def _archive_rows(
     ]
 
     for chunk in _chunked(values):
-        db.execute(insert(WhlPredictionRecordArchive), chunk)
+        db.execute(insert(ChlPredictionRecordArchive), chunk)
     db.commit()
     return len(values)
 
@@ -332,6 +414,7 @@ def _write_report_file(run_id: uuid.UUID, report_payload: dict[str, Any]) -> str
 
 def _rollback_replayed_rows(
     db: Session,
+    league_id: int,
     run_id: uuid.UUID,
     replayed_keys: set[tuple[int, int]],
 ) -> None:
@@ -339,17 +422,22 @@ def _rollback_replayed_rows(
         key_list = list(replayed_keys)
         for chunk in _chunked(key_list):
             db.execute(
-                delete(WhlPredictionRecord).where(
-                    tuple_(WhlPredictionRecord.game_id, WhlPredictionRecord.k_value).in_(chunk)
+                delete(ChlPredictionRecord).where(
+                    ChlPredictionRecord.league_id == league_id,
+                    tuple_(ChlPredictionRecord.game_id, ChlPredictionRecord.k_value).in_(chunk),
                 )
             )
 
     archived_rows = db.scalars(
-        select(WhlPredictionRecordArchive).where(WhlPredictionRecordArchive.archive_run_id == run_id)
+        select(ChlPredictionRecordArchive).where(
+            ChlPredictionRecordArchive.league_id == league_id,
+            ChlPredictionRecordArchive.archive_run_id == run_id,
+        )
     ).all()
     if archived_rows:
         restore_values = [
             {
+                "league_id": row.league_id,
                 "id": row.id,
                 "game_id": row.game_id,
                 "k_value": row.k_value,
@@ -370,7 +458,7 @@ def _rollback_replayed_rows(
             for row in archived_rows
         ]
         for chunk in _chunked(restore_values):
-            db.execute(insert(WhlPredictionRecord), chunk)
+            db.execute(insert(ChlPredictionRecord), chunk)
 
     db.commit()
 
@@ -383,7 +471,7 @@ def _extract_component_prob(result: dict[str, Any], k_value: int) -> tuple[float
 
 
 def _build_pairs_for_proof(
-    games_by_id: dict[int, WhlGame],
+    games_by_id: dict[int, ChlGame],
     old_rows_by_key: dict[tuple[int, int], dict[str, Any]],
     new_rows_by_key: dict[tuple[int, int], dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -428,23 +516,46 @@ def run_frozen_model_replay(
     *,
     date_from: dt.date | None,
     date_to: dt.date | None,
+    selection_mode: str | None = "date_range",
+    last_n_games: int | None = None,
     dry_run: bool,
     overwrite: bool,
+    rollback_on_proof_failure: bool = True,
     archive_label: str | None,
+    league_code: str | None = None,
 ) -> dict[str, Any]:
+    try:
+        normalized_league = require_supported_league_code(league_code)
+    except DataBackendError as exc:
+        raise ReplayValidationError(str(exc)) from exc
+    store = primary_store()
+    league_id = resolve_league_id_for_store(db, store, normalized_league)
+    if league_id is None:
+        raise ReplayValidationError(f"Unable to resolve league scope for league_code={normalized_league}")
+
     if not dry_run and not overwrite:
         raise ReplayValidationError("overwrite must be true when dry_run is false.")
     if not dry_run and settings.scheduler_enabled:
         raise ReplayValidationError("Set SCHEDULER_ENABLED=false for replay runs.")
 
-    frozen_bundle, frozen_pointer = load_frozen_active_model()
+    normalized_selection_mode = _normalize_selection_mode(selection_mode)
+
+    frozen_bundle, frozen_pointer = load_frozen_active_model(league_code=normalized_league)
     frozen_model_version = frozen_pointer.get("model_version")
 
-    resolved_from, resolved_to = _resolve_date_bounds(db=db, date_from=date_from, date_to=date_to)
+    games, resolved_from, resolved_to = _select_replay_games(
+        db=db,
+        league_id=league_id,
+        selection_mode=normalized_selection_mode,
+        date_from=date_from,
+        date_to=date_to,
+        last_n_games=last_n_games,
+    )
 
     run_id = uuid.uuid4()
-    run_row = WhlReplayRun(
+    run_row = ChlReplayRun(
         id=run_id,
+        league_id=league_id,
         status="running",
         started_at=dt.datetime.now(dt.UTC),
         date_from=resolved_from,
@@ -463,10 +574,10 @@ def run_frozen_model_replay(
     new_rows_by_key: dict[tuple[int, int], dict[str, Any]] = {}
 
     try:
-        games = db.scalars(completed_games_stmt(resolved_from, resolved_to)).all()
         games_by_id = {game.game_id: game for game in games}
+        selected_game_ids = [int(game.game_id) for game in games]
 
-        old_rows = db.scalars(_prediction_rows_stmt(resolved_from, resolved_to)).all()
+        old_rows = db.scalars(_prediction_rows_for_game_ids_stmt(league_id, selected_game_ids)).all()
         old_rows_by_key = {
             (row.game_id, row.k_value): {
                 "home_team_probability": (
@@ -485,7 +596,7 @@ def run_frozen_model_replay(
         rows_upserted = 0
 
         for game in games:
-            if not is_active_model_pointer_unchanged(frozen_pointer):
+            if not is_active_model_pointer_unchanged(frozen_pointer, league_code=normalized_league):
                 raise ReplaySafetyError("Active model pointer changed during replay run.")
 
             if game.game_date is None:
@@ -503,6 +614,7 @@ def run_frozen_model_replay(
                     home_team_hockeytech_id=game.home_team_id,
                     away_team_hockeytech_id=game.away_team_id,
                     game_date=game.game_date,
+                    league_code=normalized_league,
                 )
             except InsufficientHistoryError:
                 games_skipped += 1
@@ -519,10 +631,11 @@ def run_frozen_model_replay(
                 "home_team_id": game.home_team_id,
                 "away_team_id": game.away_team_id,
                 "features_by_k": built["features_by_k"],
+                "context_features": built.get("context_features") or {},
             }
 
             try:
-                result = predict_from_payload(payload, bundle=frozen_bundle)
+                result = predict_from_payload(payload, bundle=frozen_bundle, league_code=normalized_league)
             except (ModelNotAvailableError, PayloadContractError):
                 games_skipped += 1
                 skip_reasons["prediction_error"] = skip_reasons.get("prediction_error", 0) + 1
@@ -554,6 +667,7 @@ def run_frozen_model_replay(
                     result=result,
                     extra_raw_model_outputs_by_k=metadata_by_k,
                     commit=True,
+                    league_code=normalized_league,
                 )
 
         paired_rows = _build_pairs_for_proof(
@@ -564,14 +678,17 @@ def run_frozen_model_replay(
         proof_summary = build_proof_summary(paired_rows=paired_rows)
 
         status = "completed"
-        if not dry_run and not proof_summary.get("proved_better", False):
-            _rollback_replayed_rows(db=db, run_id=run_id, replayed_keys=replayed_keys)
+        if not dry_run and rollback_on_proof_failure and not proof_summary.get("proved_better", False):
+            _rollback_replayed_rows(db=db, league_id=league_id, run_id=run_id, replayed_keys=replayed_keys)
             status = "rolled_back"
 
         report_payload = {
             "run_id": str(run_id),
             "status": status,
             "replay_mode": "frozen_active",
+            "selection_mode": normalized_selection_mode,
+            "last_n_games": last_n_games if normalized_selection_mode == "last_n_completed_games" else None,
+            "rollback_on_proof_failure": bool(rollback_on_proof_failure),
             "generated_at_utc": _iso_utc_now(),
             "active_model_version": frozen_model_version,
             "date_from": str(resolved_from),
@@ -604,6 +721,8 @@ def run_frozen_model_replay(
         return {
             "run_id": str(run_id),
             "status": run_row.status,
+            "selection_mode": normalized_selection_mode,
+            "last_n_games": last_n_games if normalized_selection_mode == "last_n_completed_games" else None,
             "active_model_version": run_row.active_model_version,
             "games_scanned": run_row.games_scanned,
             "games_predicted": run_row.games_predicted,
@@ -620,23 +739,36 @@ def run_frozen_model_replay(
         raise
 
 
-def get_replay_report(db: Session, run_id: str) -> dict[str, Any]:
+def get_replay_report(db: Session, run_id: str, league_code: str | None = None) -> dict[str, Any]:
+    try:
+        normalized_league = require_supported_league_code(league_code)
+    except DataBackendError as exc:
+        raise ReplayValidationError(str(exc)) from exc
+    store = primary_store()
+    league_id = resolve_league_id_for_store(db, store, normalized_league)
+    if league_id is None:
+        raise ReplayValidationError(f"Unable to resolve league scope for league_code={normalized_league}")
+
     try:
         parsed = uuid.UUID(run_id)
     except ValueError as exc:
         raise ReplayValidationError("run_id must be a valid UUID.") from exc
 
-    run = db.get(WhlReplayRun, parsed)
+    run = db.scalar(select(ChlReplayRun).where(ChlReplayRun.id == parsed, ChlReplayRun.league_id == league_id))
     if run is None:
         raise ReplayNotFoundError(f"Replay run not found: {run_id}")
 
     proof = run.proof_json or {}
     skip_reasons = proof.get("skip_reasons") if isinstance(proof, dict) else {}
     proof_summary = proof.get("proof_summary") if isinstance(proof, dict) else None
+    selection_mode = proof.get("selection_mode") if isinstance(proof, dict) else None
+    last_n_games = proof.get("last_n_games") if isinstance(proof, dict) else None
 
     return {
         "run_id": str(run.id),
         "status": run.status,
+        "selection_mode": selection_mode,
+        "last_n_games": last_n_games,
         "date_from": run.date_from,
         "date_to": run.date_to,
         "started_at": run.started_at,

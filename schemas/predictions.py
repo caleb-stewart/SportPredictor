@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,7 @@ class KComponentProbability(BaseModel):
 
 
 class PredictionResponse(BaseModel):
+    league_code: str = "whl"
     home_team_prob: float
     away_team_prob: float
     predicted_winner_id: Optional[int]
@@ -22,28 +23,39 @@ class PredictionResponse(BaseModel):
 
 
 class CustomPredictionRequest(BaseModel):
-    home_team_id: int = Field(description="HockeyTech WHL team id")
-    away_team_id: int = Field(description="HockeyTech WHL team id")
+    league_code: str = Field(default="whl", description="League code (whl|ohl|lhjmq)")
+    home_team_id: int = Field(description="HockeyTech team id")
+    away_team_id: int = Field(description="HockeyTech team id")
     game_date: dt.date
     store_result: bool = False
 
 
 class UpcomingPredictionRunResponse(BaseModel):
+    league_code: str = "whl"
     target_date: dt.date
     predictions_written: int
     skipped_games: int
 
 
 class PredictionHistoryRecord(BaseModel):
+    league_code: str = "whl"
     id: int
     game_id: int
     k_value: int
     home_team_id: int
     away_team_id: int
+    home_team_provider_id: Optional[int] = None
+    away_team_provider_id: Optional[int] = None
+    home_team_name: Optional[str] = None
+    away_team_name: Optional[str] = None
     predicted_winner_id: Optional[int]
+    predicted_winner_provider_id: Optional[int] = None
+    predicted_winner_name: Optional[str] = None
     home_team_probability: Optional[Decimal]
     away_team_probability: Optional[Decimal]
     actual_winner_id: Optional[int]
+    actual_winner_provider_id: Optional[int] = None
+    actual_winner_name: Optional[str] = None
     correct: Optional[bool]
     prediction_date: Optional[dt.datetime]
     model_version: Optional[str]
@@ -53,6 +65,7 @@ class PredictionHistoryRecord(BaseModel):
 
 class CustomPredictionStoredResponse(BaseModel):
     id: str
+    league_code: str = "whl"
     home_team_id: int
     away_team_id: int
     game_date: dt.date
@@ -70,16 +83,23 @@ class CustomPredictionApiResponse(PredictionResponse):
 
 
 class ReplayRunRequest(BaseModel):
+    league_code: str = "whl"
     date_from: Optional[dt.date] = None
     date_to: Optional[dt.date] = None
+    selection_mode: Literal["date_range", "last_n_completed_games"] = "date_range"
+    last_n_games: Optional[int] = Field(default=None, ge=1)
     dry_run: bool
     overwrite: bool
+    rollback_on_proof_failure: bool = True
     archive_label: Optional[str] = None
 
 
 class ReplayRunResponse(BaseModel):
+    league_code: str = "whl"
     run_id: str
     status: str
+    selection_mode: Optional[Literal["date_range", "last_n_completed_games"]] = None
+    last_n_games: Optional[int] = None
     active_model_version: Optional[str]
     games_scanned: int
     games_predicted: int
@@ -90,8 +110,11 @@ class ReplayRunResponse(BaseModel):
 
 
 class ReplayReportResponse(BaseModel):
+    league_code: str = "whl"
     run_id: str
     status: str
+    selection_mode: Optional[Literal["date_range", "last_n_completed_games"]] = None
+    last_n_games: Optional[int] = None
     date_from: Optional[dt.date]
     date_to: Optional[dt.date]
     started_at: Optional[dt.datetime]

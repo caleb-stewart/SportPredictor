@@ -1,0 +1,78 @@
+{
+  "baseline_model_version": "20260217T025259Z",
+  "candidate_model_version": "20260217T025309Z",
+  "counts": {
+    "games_compared": 374,
+    "games_scanned": 374
+  },
+  "date_from": "2025-01-01",
+  "date_to": "2025-03-31",
+  "generated_at_utc": "2026-02-21T19:28:08Z",
+  "mode": "frozen_replay",
+  "proof_summary": {
+    "by_season": [
+      {
+        "baseline": {
+          "accuracy": 0.659217877094972,
+          "brier": 0.21157505199739302,
+          "log_loss": 0.6092502784596772
+        },
+        "candidate": {
+          "accuracy": 0.659217877094972,
+          "brier": 0.21157505199739302,
+          "log_loss": 0.6092502784596772
+        },
+        "delta_new_minus_old": {
+          "accuracy": 0.0,
+          "brier": 0.0,
+          "log_loss": 0.0
+        },
+        "games": 358,
+        "season_name": "2024 - 25 Regular Season"
+      }
+    ],
+    "overall": {
+      "baseline": {
+        "accuracy": 0.6631016042780749,
+        "brier": 0.20981969542030168,
+        "log_loss": 0.6056919484827504
+      },
+      "candidate": {
+        "accuracy": 0.6631016042780749,
+        "brier": 0.20981969542030168,
+        "log_loss": 0.6056919484827504
+      },
+      "delta_new_minus_old": {
+        "accuracy": 0.0,
+        "brier": 0.0,
+        "log_loss": 0.0
+      }
+    },
+    "paired_games": 374,
+    "pass_criteria": {
+      "accuracy_delta_ci_above_zero": false,
+      "accuracy_improved": false,
+      "log_loss_improved": false,
+      "mcnemar_significant": false
+    },
+    "proved_better": false,
+    "stat_tests": {
+      "bootstrap_accuracy_delta": {
+        "ci95_high": 0.0,
+        "ci95_low": 0.0,
+        "delta_mean": 0.0,
+        "samples": 2000,
+        "seed": 42
+      },
+      "mcnemar": {
+        "b": 0,
+        "c": 0,
+        "method": "degenerate",
+        "n": 0,
+        "p_value": 1.0
+      }
+    }
+  },
+  "proved_better": false,
+  "run_id": "47a0c29b-2c81-4f74-b6dd-34e287cbc3f5"
+}

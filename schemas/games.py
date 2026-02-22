@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 
 class UpcomingGameResponse(BaseModel):
+    league_code: str = "whl"
     game_id: int
     game_date: Optional[dt.date]
     status: Optional[str]

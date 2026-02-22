@@ -15,6 +15,15 @@ class ConstantModel:
         return np.column_stack([np.full(rows, 1 - self.p), np.full(rows, self.p)])
 
 
+class ConstantRegressor:
+    def __init__(self, value: float) -> None:
+        self.value = float(value)
+
+    def predict(self, x):
+        rows = len(x)
+        return np.full(rows, self.value)
+
+
 def base_stats(goals_for: float, goals_against: float, shots_for: float) -> dict[str, float]:
     return {
         "goals_for_avg": goals_for,
@@ -84,3 +93,39 @@ def test_predictor_missing_k_raises(monkeypatch):
 
     with pytest.raises(predictor.PayloadContractError):
         predictor.predict_from_payload(payload)
+
+
+def test_predictor_v3_branches_use_context(monkeypatch):
+    bundle = {
+        "model_version": "test-v3",
+        "model_family": "whl_v3_hybrid_branch_stacker",
+        "base_models": {"5": ConstantModel(0.61), "10": ConstantModel(0.63), "15": ConstantModel(0.65)},
+        "rating_model": ConstantModel(0.66),
+        "rating_feature_columns": ["elo_diff_pre", "rest_days_diff"],
+        "goals_regressor": ConstantRegressor(0.5),
+        "goals_calibrator": ConstantModel(0.67),
+        "goals_feature_columns": ["goals_for_avg_diff", "shots_for_avg_diff", "elo_diff_pre"],
+        "meta_input_columns": ["p_k_5", "p_k_10", "p_k_15", "p_rating", "p_goals"],
+        "meta_model": ConstantModel(0.68),
+    }
+    monkeypatch.setattr(predictor, "load_active_model", lambda: bundle)
+
+    payload = {
+        "home_team_id": 215,
+        "away_team_id": 206,
+        "features_by_k": {
+            "5": {"home": base_stats(3.9, 2.1, 32.0), "away": base_stats(3.0, 2.9, 28.0)},
+            "10": {"home": base_stats(3.7, 2.3, 31.0), "away": base_stats(3.1, 2.8, 29.0)},
+            "15": {"home": base_stats(3.5, 2.5, 30.0), "away": base_stats(2.9, 2.9, 28.0)},
+        },
+        "context_features": {
+            "elo_diff_pre": 40.0,
+            "rest_days_diff": 1.0,
+            "strength_adjusted_goals_diff": 0.1,
+            "strength_adjusted_sog_diff": 0.2,
+        },
+    }
+
+    out = predictor.predict_from_payload(payload)
+    assert out["model_version"] == "test-v3"
+    assert pytest.approx(out["home_team_prob"], rel=1e-6) == 0.68

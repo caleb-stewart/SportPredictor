@@ -1,4 +1,4 @@
-"""Canonical WHL dataset extraction for Predictor V2 training."""
+"""Canonical CHL dataset extraction for training."""
 
 from __future__ import annotations
 
@@ -12,13 +12,18 @@ from typing import Optional
 
 import pandas as pd
 
+from core.config import settings
+from services.data_backend import CHL_LEAGUES, normalize_league_code
+from services.context_features import build_context_feature_map
 from services.training_features import FEATURE_COLUMNS, K_VALUES, build_pairwise_features
 
-CANONICAL_SQL = """
+CANONICAL_SQL_CHL_TEMPLATE = """
 SELECT
   g.game_id,
   g.game_date,
   g.season_id,
+  g.home_goal_count,
+  g.away_goal_count,
   g.home_team_id,
   g.away_team_id,
   h.k_value,
@@ -47,22 +52,25 @@ SELECT
   a.ppp_diff AS a_ppp_diff,
   a.sog_diff AS a_sog_diff,
   a.fowp_diff AS a_fowp_diff
-FROM whl_games g
-JOIN whl_teams ht ON ht.hockeytech_id = g.home_team_id
-JOIN whl_teams at ON at.hockeytech_id = g.away_team_id
-JOIN whl_rolling_averages h
+FROM chl_games g
+JOIN chl_teams ht ON ht.hockeytech_id = g.home_team_id AND ht.league_id = g.league_id
+JOIN chl_teams at ON at.hockeytech_id = g.away_team_id AND at.league_id = g.league_id
+JOIN chl_rolling_averages h
   ON h.game_id = g.game_id
- AND h.whl_team_id = ht.id
+ AND h.team_id = ht.id
+ AND h.league_id = g.league_id
  AND h.home_away = 1
-JOIN whl_rolling_averages a
+JOIN chl_rolling_averages a
   ON a.game_id = g.game_id
- AND a.whl_team_id = at.id
+ AND a.team_id = at.id
  AND a.k_value = h.k_value
+ AND a.league_id = g.league_id
  AND a.home_away = 0
 WHERE g.game_date IS NOT NULL
   AND g.home_goal_count IS NOT NULL
   AND g.away_goal_count IS NOT NULL
   AND h.k_value IN (5, 10, 15)
+  AND g.league_id = {league_id}
 ORDER BY g.game_date, g.game_id, h.k_value
 """
 
@@ -119,10 +127,18 @@ def _row_metric_map(row: pd.Series, side: str) -> dict[str, float]:
     }
 
 
-def load_canonical_dataset(db: Optional[DbConfig] = None) -> pd.DataFrame:
+def _canonical_sql(league_code: str | None = None) -> str:
+    normalized = normalize_league_code(league_code or settings.default_league_code)
+    league_cfg = CHL_LEAGUES.get(normalized)
+    if not league_cfg:
+        raise ValueError(f"Unsupported league_code for training dataset: {league_code}")
+    return CANONICAL_SQL_CHL_TEMPLATE.format(league_id=int(league_cfg["id"]))
+
+
+def load_canonical_dataset(db: Optional[DbConfig] = None, league_code: str | None = None) -> pd.DataFrame:
     """Load canonical game-level rows and append engineered features."""
     db_config = db or DbConfig()
-    csv_text = _run_psql_copy(CANONICAL_SQL, db_config)
+    csv_text = _run_psql_copy(_canonical_sql(league_code=league_code), db_config)
     frame = pd.read_csv(StringIO(csv_text), parse_dates=["game_date"])  # type: ignore[arg-type]
 
     if frame.empty:
@@ -136,6 +152,44 @@ def load_canonical_dataset(db: Optional[DbConfig] = None) -> pd.DataFrame:
 
     engineered_df = pd.DataFrame(engineered_rows)
     out = pd.concat([frame.reset_index(drop=True), engineered_df], axis=1)
+
+    games_frame = (
+        out[
+            [
+                "game_id",
+                "game_date",
+                "home_team_id",
+                "away_team_id",
+                "home_goal_count",
+                "away_goal_count",
+            ]
+        ]
+        .drop_duplicates(subset=["game_id"])
+        .sort_values(["game_date", "game_id"])
+        .reset_index(drop=True)
+    )
+    context_by_game = build_context_feature_map(games_frame=games_frame)
+    context_df = pd.DataFrame(
+        [
+            {"game_id": game_id, **context}
+            for game_id, context in context_by_game.items()
+        ]
+    )
+    if not context_df.empty:
+        out = out.merge(context_df, how="left", on="game_id")
+
+    # Opponent-strength-adjusted pairwise signals used by V3 branch models.
+    if "elo_diff_pre" in out.columns:
+        elo_diff = out["elo_diff_pre"].astype(float)
+    else:
+        elo_diff = pd.Series(0.0, index=out.index, dtype=float)
+    out["strength_adjusted_goals_diff"] = (
+        out["goals_diff_diff"].astype(float) - (elo_diff.astype(float) / 400.0)
+    )
+    out["strength_adjusted_sog_diff"] = (
+        out["sog_diff_diff"].astype(float) - (elo_diff.astype(float) / 400.0)
+    )
+
     out = out.sort_values(["game_date", "game_id", "k_value"]).reset_index(drop=True)
     return out
 

@@ -1,0 +1,220 @@
+Traceback (most recent call last):
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.DeadlockDetected: deadlock detected
+DETAIL:  Process 88235 waits for ShareLock on transaction 829888; blocked by process 91063.
+Process 91063 waits for ShareLock on transaction 829889; blocked by process 88235.
+HINT:  See server log for query details.
+CONTEXT:  while inserting index tuple (3091,5) in relation "chl_games"
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/caleb/Projects/SportPredictor/services/chl_history_ingest.py", line 508, in run_chl_history_backfill
+    values, update_values = build_schedule_game_upsert_values(game_data=game_data, now=now)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/services/chl_history_ingest.py", line 183, in _upsert_game_row
+    
+    
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2365, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2251, in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/bulk_persistence.py", line 1306, in orm_execute_statement
+    result = conn.execute(
+             ^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+           ^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 526, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.OperationalError: (psycopg2.errors.DeadlockDetected) deadlock detected
+DETAIL:  Process 88235 waits for ShareLock on transaction 829888; blocked by process 91063.
+Process 91063 waits for ShareLock on transaction 829889; blocked by process 88235.
+HINT:  See server log for query details.
+CONTEXT:  while inserting index tuple (3091,5) in relation "chl_games"
+
+[SQL: INSERT INTO chl_games (league_id, game_id, season_id, season_name, game_date, venue, status, home_goal_count, away_goal_count, scoring_breakdown, shots_on_goal, period, game_number, power_play, fow, home_power_play_percentage, away_power_play_percentage, home_faceoff_win_percentage, away_faceoff_win_percentage, home_shots_on_goal_total, away_shots_on_goal_total, home_team, away_team, home_team_id, away_team_id, created_at, updated_at, scorebar_snapshot, scheduled_time_utc) VALUES (%(league_id)s, %(game_id)s, %(season_id)s, %(season_name)s, %(game_date)s, %(venue)s, %(status)s, %(home_goal_count)s, %(away_goal_count)s, %(scoring_breakdown)s::JSONB, %(shots_on_goal)s::JSONB, %(period)s, %(game_number)s, %(power_play)s::JSONB, %(fow)s::JSONB, %(home_power_play_percentage)s, %(away_power_play_percentage)s, %(home_faceoff_win_percentage)s, %(away_faceoff_win_percentage)s, %(home_shots_on_goal_total)s, %(away_shots_on_goal_total)s, %(home_team)s, %(away_team)s, %(home_team_id)s, %(away_team_id)s, %(created_at)s, %(updated_at)s, %(scorebar_snapshot)s::JSONB, %(scheduled_time_utc)s) ON CONFLICT (league_id, game_id) DO UPDATE SET league_id = %(param_1)s, game_id = %(param_2)s, season_id = %(param_3)s, season_name = %(param_4)s, game_date = %(param_5)s, venue = %(param_6)s, status = %(param_7)s, home_goal_count = %(param_8)s, away_goal_count = %(param_9)s, scoring_breakdown = %(param_10)s::JSONB, shots_on_goal = %(param_11)s::JSONB, period = %(param_12)s, game_number = %(param_13)s, power_play = %(param_14)s::JSONB, fow = %(param_15)s::JSONB, home_power_play_percentage = %(param_16)s, away_power_play_percentage = %(param_17)s, home_faceoff_win_percentage = %(param_18)s, away_faceoff_win_percentage = %(param_19)s, home_shots_on_goal_total = %(param_20)s, away_shots_on_goal_total = %(param_21)s, home_team = %(param_22)s, away_team = %(param_23)s, home_team_id = %(param_24)s, away_team_id = %(param_25)s, updated_at = %(param_26)s, scorebar_snapshot = %(param_27)s::JSONB, scheduled_time_utc = %(param_28)s RETURNING chl_games.id]
+[parameters: {'league_id': 2, 'game_id': 25821, 'season_id': '73', 'season_name': '2022-23 Regular Season', 'game_date': datetime.date(2022, 11, 18), 'venue': 'Sudbury Community Arena', 'status': 'Final', 'home_goal_count': 3, 'away_goal_count': 4, 'scoring_breakdown': '{"home": {"1": "3", "2": "0", "3": "0"}, "visiting": {"1": "2", "2": "0", "3": "2"}}', 'shots_on_goal': '{"home": {"1": 17, "2": 14, "3": 14}, "visiting": {"1": 12, "2": 11, "3": 9}}', 'period': '3', 'game_number': 187, 'power_play': '{"total": {"home": "6", "visiting": "2"}, "goals": {"home": "0", "visiting": "0"}}', 'fow': '{"home": 33, "visiting": 24}', 'home_power_play_percentage': 0.0, 'away_power_play_percentage': 0.0, 'home_faceoff_win_percentage': 0.5789473684210527, 'away_faceoff_win_percentage': 0.42105263157894735, 'home_shots_on_goal_total': 45, 'away_shots_on_goal_total': 32, 'home_team': 'Sudbury Wolves', 'away_team': 'Barrie Colts', 'home_team_id': 12, 'away_team_id': 7, 'created_at': datetime.datetime(2026, 2, 21, 21, 18, 13, 963015, tzinfo=datetime.timezone.utc), 'updated_at': datetime.datetime(2026, 2, 21, 21, 18, 13, 963015, tzinfo=datetime.timezone.utc), 'scorebar_snapshot': '{"id": "25821", "game_id": "25821", "season_id": "73", "quick_score": "0", "date_played": "2022-11-18", "date": "Nov. 18", "date_with_day": "Fri, Nov ... (2151 characters truncated) ... atch.chl.ca/ohl_chl"}]}, "mobile_calendar": "https://lscluster.hockeytech.com/components/calendar/ical_add_games.php?client_code=ohl&game_ids=25821"}', 'scheduled_time_utc': datetime.datetime(2022, 11, 18, 19, 5, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=68400))), 'param_1': 2, 'param_2': 25821, 'param_3': '73', 'param_4': '2022-23 Regular Season', 'param_5': datetime.date(2022, 11, 18), 'param_6': 'Sudbury Community Arena', 'param_7': 'Final', 'param_8': 3, 'param_9': 4, 'param_10': '{"home": {"1": "3", "2": "0", "3": "0"}, "visiting": {"1": "2", "2": "0", "3": "2"}}', 'param_11': '{"home": {"1": 17, "2": 14, "3": 14}, "visiting": {"1": 12, "2": 11, "3": 9}}', 'param_12': '3', 'param_13': 187, 'param_14': '{"total": {"home": "6", "visiting": "2"}, "goals": {"home": "0", "visiting": "0"}}', 'param_15': '{"home": 33, "visiting": 24}', 'param_16': 0.0, 'param_17': 0.0, 'param_18': 0.5789473684210527, 'param_19': 0.42105263157894735, 'param_20': 45, 'param_21': 32, 'param_22': 'Sudbury Wolves', 'param_23': 'Barrie Colts', 'param_24': 12, 'param_25': 7, 'param_26': datetime.datetime(2026, 2, 21, 21, 18, 13, 963015, tzinfo=datetime.timezone.utc), 'param_27': '{"id": "25821", "game_id": "25821", "season_id": "73", "quick_score": "0", "date_played": "2022-11-18", "date": "Nov. 18", "date_with_day": "Fri, Nov ... (2151 characters truncated) ... atch.chl.ca/ohl_chl"}]}, "mobile_calendar": "https://lscluster.hockeytech.com/components/calendar/ical_add_games.php?client_code=ohl&game_ids=25821"}', 'param_28': datetime.datetime(2022, 11, 18, 19, 5, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=68400)))}]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.InFailedSqlTransaction: current transaction is aborted, commands ignored until end of transaction block
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/caleb/Projects/SportPredictor/services/chl_history_ingest.py", line 518, in run_chl_history_backfill
+    game_ids = sorted(schedule_by_game_id.keys())
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/services/chl_history_ingest.py", line 205, in _mark_failure
+    error_text: str,
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2365, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2251, in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/bulk_persistence.py", line 1306, in orm_execute_statement
+    result = conn.execute(
+             ^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+           ^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 526, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.InternalError: (psycopg2.errors.InFailedSqlTransaction) current transaction is aborted, commands ignored until end of transaction block
+
+[SQL: INSERT INTO chl_ingest_game_failures (run_id, league_id, game_id, season_id, stage, attempts, last_error, last_seen_at) VALUES (%(run_id)s::UUID, %(league_id)s, %(game_id)s, %(season_id)s, %(stage)s, %(attempts)s, %(last_error)s, %(last_seen_at)s) ON CONFLICT (run_id, league_id, game_id, stage) DO UPDATE SET season_id = %(param_1)s, attempts = %(param_2)s, last_error = %(param_3)s, last_seen_at = %(param_4)s RETURNING chl_ingest_game_failures.id]
+[parameters: {'run_id': UUID('a6c621e2-0b5e-4a9b-a4cc-565ec10c53e7'), 'league_id': 2, 'game_id': 25821, 'season_id': '73', 'stage': 'normalize', 'attempts': 1, 'last_error': '(psycopg2.errors.DeadlockDetected) deadlock detected\nDETAIL:  Process 88235 waits for ShareLock on transaction 829888; blocked by process 91063.\nPr ... (5349 characters truncated) ...  11, 18, 19, 5, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=68400)))}]\n(Background on this error at: https://sqlalche.me/e/20/e3q8)', 'last_seen_at': datetime.datetime(2026, 2, 21, 21, 18, 14, 964970, tzinfo=datetime.timezone.utc), 'param_1': '73', 'param_2': 1, 'param_3': '(psycopg2.errors.DeadlockDetected) deadlock detected\nDETAIL:  Process 88235 waits for ShareLock on transaction 829888; blocked by process 91063.\nPr ... (5349 characters truncated) ...  11, 18, 19, 5, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=68400)))}]\n(Background on this error at: https://sqlalche.me/e/20/e3q8)', 'param_4': datetime.datetime(2026, 2, 21, 21, 18, 14, 964970, tzinfo=datetime.timezone.utc)}]
+(Background on this error at: https://sqlalche.me/e/20/2j85)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.InFailedSqlTransaction: current transaction is aborted, commands ignored until end of transaction block
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/caleb/Projects/SportPredictor/scripts/backfill_chl_history.py", line 57, in <module>
+    level=getattr(logging, args.log_level),
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/services/chl_history_ingest.py", line 567, in run_chl_history_backfill
+    if result.clock is None:
+
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2032, in commit
+    trans.commit(_to_root=True)
+  File "<string>", line 2, in commit
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 1313, in commit
+    self._prepare_impl()
+  File "<string>", line 2, in _prepare_impl
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 1288, in _prepare_impl
+    self.session.flush()
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 4345, in flush
+    self._flush(objects)
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 4480, in _flush
+    with util.safe_reraise():
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 224, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 4441, in _flush
+    flush_context.execute()
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/unitofwork.py", line 466, in execute
+    rec.execute(self)
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/unitofwork.py", line 642, in execute
+    util.preloaded.orm_persistence.save_obj(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/persistence.py", line 85, in save_obj
+    _emit_update_statements(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/persistence.py", line 778, in _emit_update_statements
+    for (
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/persistence.py", line 577, in _collect_update_commands
+    history = state.manager[propkey].impl.get_history(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/attributes.py", line 1265, in get_history
+    current = self.get(state, dict_, passive=passive)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/attributes.py", line 1096, in get
+    value = self._fire_loader_callables(state, key, passive)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/attributes.py", line 1126, in _fire_loader_callables
+    return state._load_expired(state, passive)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/state.py", line 803, in _load_expired
+    self.manager.expired_attribute_loader(self, toload, passive)
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/loading.py", line 1674, in load_scalar_attributes
+    result = load_on_ident(
+             ^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/loading.py", line 510, in load_on_ident
+    return load_on_pk_identity(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/loading.py", line 695, in load_on_pk_identity
+    session.execute(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2365, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2251, in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/orm/context.py", line 306, in orm_execute_statement
+    result = conn.execute(
+             ^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+           ^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 526, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/home/caleb/Projects/SportPredictor/.venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.InternalError: (psycopg2.errors.InFailedSqlTransaction) current transaction is aborted, commands ignored until end of transaction block
+
+[SQL: SELECT chl_ingest_runs.id AS chl_ingest_runs_id, chl_ingest_runs.league_id AS chl_ingest_runs_league_id, chl_ingest_runs.mode AS chl_ingest_runs_mode, chl_ingest_runs.started_at AS chl_ingest_runs_started_at, chl_ingest_runs.selected_season_ids AS chl_ingest_runs_selected_season_ids 
+FROM chl_ingest_runs 
+WHERE chl_ingest_runs.id = %(pk_1)s::UUID]
+[parameters: {'pk_1': UUID('a6c621e2-0b5e-4a9b-a4cc-565ec10c53e7')}]
+(Background on this error at: https://sqlalche.me/e/20/2j85)

@@ -1,6 +1,6 @@
 # SportPredictor (Python-Only FastAPI Backend)
 
-Single-backend WHL predictor using FastAPI + SQLAlchemy + APScheduler on the existing Postgres schema.
+CHL predictor backend (`whl`, `ohl`, `lhjmq`) using FastAPI + SQLAlchemy + APScheduler.
 
 ## Pre-Cutover Safety
 
@@ -18,14 +18,14 @@ Restore example:
 PGPASSWORD=qqqq pg_restore -h localhost -U postgres -d sportpredictor_development --clean --if-exists backups/pre_cutover_<timestamp>.dump
 ```
 
-Capture baseline table counts:
+Capture baseline CHL table counts:
 
 ```bash
 PGPASSWORD=qqqq psql -h localhost -U postgres -d sportpredictor_development -At -c "\
-SELECT 'whl_games|'||count(*) FROM whl_games UNION ALL \
-SELECT 'whl_teams|'||count(*) FROM whl_teams UNION ALL \
-SELECT 'whl_rolling_averages|'||count(*) FROM whl_rolling_averages UNION ALL \
-SELECT 'whl_prediction_records|'||count(*) FROM whl_prediction_records;"
+SELECT 'chl_games|'||count(*) FROM chl_games UNION ALL \
+SELECT 'chl_teams|'||count(*) FROM chl_teams UNION ALL \
+SELECT 'chl_rolling_averages|'||count(*) FROM chl_rolling_averages UNION ALL \
+SELECT 'chl_prediction_records|'||count(*) FROM chl_prediction_records;"
 ```
 
 ## Setup
@@ -42,9 +42,13 @@ The training pipeline uses the `psql` CLI to export canonical datasets, so Postg
 
 Required:
 - `DATABASE_URL`
-- `HOCKEYTECH_API`
+- `HOCKEYTECH_API_KEY_WHL|HOCKEYTECH_API_KEY_OHL|HOCKEYTECH_API_KEY_LHJMQ`
 
 Recommended defaults are in `.env.example`.
+
+Runtime flags:
+- `DATA_BACKEND=chl`
+- `DEFAULT_LEAGUE_CODE=whl|ohl|lhjmq`
 
 ## Database Migrations (Alembic)
 
@@ -78,13 +82,25 @@ uvicorn main:app --reload --port 3141
 ## API Endpoints
 
 - `GET /health`
-- `GET /teams`
-- `GET /games/upcoming?date=YYYY-MM-DD`
-- `POST /predictions/upcoming/run?date=YYYY-MM-DD`
+- `GET /teams?league_code=whl`
+- `GET /games/upcoming?league_code=whl&date=YYYY-MM-DD`
+- `POST /predictions/upcoming/run?league_code=whl&date=YYYY-MM-DD`
 - `POST /predictions/custom`
-- `GET /predictions/history?date_from=&date_to=&team_id=&k_value=`
-- `POST /models/train`
-- `GET /models/active`
+- `GET /predictions/history?league_code=whl&date_from=&date_to=&team_id=&k_value=`
+- `POST /predictions/replay/run` (body supports `league_code`)
+- `GET /predictions/replay/report/{run_id}?league_code=whl`
+- `POST /models/train?league_code=whl`
+- `GET /models/active?league_code=whl`
+- `GET /leagues`
+- `GET /leagues/{league_code}/teams`
+- `GET /leagues/{league_code}/predicted-games`
+- `GET /leagues/{league_code}/reports/daily`
+- `GET /leagues/{league_code}/reports/daily/{prediction_date}`
+- `GET /leagues/{league_code}/games/{game_id}`
+- `POST /models/compare/run?league_code=whl`
+- `GET /models/compare/report/{run_id}?league_code=whl`
+- `POST /experiments/feature-proposal/run?league_code=whl`
+- `GET /experiments/{experiment_id}?league_code=whl`
 
 ## Scheduler (APScheduler)
 
@@ -96,11 +112,30 @@ Timezone: `America/Los_Angeles`
 - `09:30` train model (stage candidate)
 - `09:40` promote staged model (if gates pass)
 - `09:45` predict next-day games
+- `Sunday 10:00` weekly model compare (`candidate=active` vs configured baseline)
 
 Manual daily run:
 
 ```bash
 python scripts/run_daily_pipeline.py
+```
+
+Historical CHL backfill (season-based, resumable):
+
+```bash
+python scripts/backfill_chl_history.py --leagues ohl,lhjmq --dry-run
+python scripts/backfill_chl_history.py --leagues ohl,lhjmq --all-available-seasons true --include-regular true --include-playoffs true --include-preseason true
+```
+
+Freeze baseline proof snapshot:
+
+```bash
+python scripts/freeze_proof_baseline.py \
+  --candidate-model-version 20260217T025309Z \
+  --baseline-model-version 20260214T185052Z \
+  --date-from 2023-09-01 \
+  --date-to 2025-09-05 \
+  --output reports/baseline_proof_snapshot.json
 ```
 
 ## Model Artifacts

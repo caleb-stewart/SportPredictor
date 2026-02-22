@@ -1,0 +1,122 @@
+{
+  "active_model_version": "20260217T025309Z",
+  "counts": {
+    "games_predicted": 9,
+    "games_scanned": 10,
+    "games_skipped": 1,
+    "paired_rows": 27,
+    "rows_upserted": 0
+  },
+  "date_from": "2025-09-03",
+  "date_to": "2025-09-05",
+  "generated_at_utc": "2026-02-22T01:23:51Z",
+  "last_n_games": 10,
+  "proof_summary": {
+    "by_k": {
+      "10": {
+        "delta_new_minus_old": {
+          "accuracy": 0.0,
+          "brier": 3.931579782151529e-06,
+          "log_loss": 1.5724809846906496e-05
+        },
+        "new": {
+          "accuracy": 0.5555555555555556,
+          "brier": 0.24314776269089322,
+          "log_loss": 0.687678452892339
+        },
+        "old": {
+          "accuracy": 0.5555555555555556,
+          "brier": 0.24314383111111107,
+          "log_loss": 0.6876627280824921
+        },
+        "rows": 9
+      },
+      "15": {
+        "delta_new_minus_old": {
+          "accuracy": 0.0,
+          "brier": 3.737975801831883e-06,
+          "log_loss": 4.7385499752916616e-06
+        },
+        "new": {
+          "accuracy": 0.6666666666666666,
+          "brier": 0.23738487353135737,
+          "log_loss": 0.6743440738466236
+        },
+        "old": {
+          "accuracy": 0.6666666666666666,
+          "brier": 0.23738113555555554,
+          "log_loss": 0.6743393352966484
+        },
+        "rows": 9
+      },
+      "5": {
+        "delta_new_minus_old": {
+          "accuracy": 0.0,
+          "brier": -5.453625857687605e-06,
+          "log_loss": -1.512142103898828e-05
+        },
+        "new": {
+          "accuracy": 0.6666666666666666,
+          "brier": 0.25393086859636455,
+          "log_loss": 0.7062006549736802
+        },
+        "old": {
+          "accuracy": 0.6666666666666666,
+          "brier": 0.25393632222222223,
+          "log_loss": 0.7062157763947192
+        },
+        "rows": 9
+      }
+    },
+    "overall": {
+      "delta_new_minus_old": {
+        "accuracy": 0.0,
+        "brier": 7.386432420708466e-07,
+        "log_loss": 1.7806462611069662e-06
+      },
+      "new": {
+        "accuracy": 0.6296296296296297,
+        "brier": 0.2448211682728717,
+        "log_loss": 0.6894077272375476
+      },
+      "old": {
+        "accuracy": 0.6296296296296297,
+        "brier": 0.24482042962962963,
+        "log_loss": 0.6894059465912865
+      }
+    },
+    "paired_rows": 27,
+    "pass_criteria": {
+      "accuracy_delta_ci_above_zero": false,
+      "accuracy_improved": false,
+      "log_loss_improved": false,
+      "mcnemar_significant": false
+    },
+    "proved_better": false,
+    "stat_tests": {
+      "bootstrap_accuracy_delta": {
+        "ci95_high": 0.0,
+        "ci95_low": 0.0,
+        "delta_mean": 0.0,
+        "samples": 2000,
+        "seed": 42
+      },
+      "mcnemar": {
+        "b": 0,
+        "c": 0,
+        "method": "degenerate",
+        "n": 0,
+        "p_value": 1.0
+      }
+    }
+  },
+  "proved_better": false,
+  "replay_mode": "frozen_active",
+  "rollback_on_proof_failure": false,
+  "run_id": "e15aa768-dd25-4ad6-9965-11babb40f7d3",
+  "selection_mode": "last_n_completed_games",
+  "skip_reasons": {
+    "insufficient_history": 1
+  },
+  "status": "completed"
+}

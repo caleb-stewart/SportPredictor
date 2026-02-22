@@ -88,3 +88,51 @@ def test_replay_report_endpoint_returns_payload(monkeypatch):
     body = response.json()
     assert body["run_id"] == "11111111-1111-1111-1111-111111111111"
     assert body["proof_summary"]["proved_better"] is True
+
+
+def test_replay_run_endpoint_accepts_last_n_selection(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {
+            "run_id": "22222222-2222-2222-2222-222222222222",
+            "status": "completed",
+            "selection_mode": "last_n_completed_games",
+            "last_n_games": 1500,
+            "active_model_version": "20260222T002228Z",
+            "games_scanned": 1500,
+            "games_predicted": 1497,
+            "games_skipped": 3,
+            "rows_upserted": 4491,
+            "skip_reasons": {"insufficient_history": 3},
+            "proof_summary": {"proved_better": False},
+        }
+
+    from api.routes import predictions as predictions_route
+
+    monkeypatch.setattr(predictions_route, "run_frozen_model_replay", fake_run)
+    app.dependency_overrides[get_db] = _fake_get_db
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/predictions/replay/run",
+            json={
+                "league_code": "ohl",
+                "selection_mode": "last_n_completed_games",
+                "last_n_games": 1500,
+                "dry_run": False,
+                "overwrite": True,
+                "rollback_on_proof_failure": False,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["selection_mode"] == "last_n_completed_games"
+    assert body["last_n_games"] == 1500
+    assert captured["selection_mode"] == "last_n_completed_games"
+    assert captured["last_n_games"] == 1500
+    assert captured["rollback_on_proof_failure"] is False

@@ -64,7 +64,7 @@ def _config(output_root: Path, version: str) -> TrainerConfig:
 
 def test_train_model_package_is_deterministic(monkeypatch, tmp_path: Path):
     dataset = _synthetic_dataset()
-    monkeypatch.setattr("services.trainer.load_canonical_dataset", lambda _db: dataset.copy())
+    monkeypatch.setattr("services.trainer.load_canonical_dataset", lambda *args, **kwargs: dataset.copy())
 
     details1, code1 = train_model_package(_config(tmp_path / "run1", "unit-v1"))
     details2, code2 = train_model_package(_config(tmp_path / "run2", "unit-v2"))
