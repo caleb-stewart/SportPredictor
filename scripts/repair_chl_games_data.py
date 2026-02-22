@@ -7,15 +7,14 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-import sys
+try:
+    from scripts._cli_utils import ensure_repo_root_on_path, parse_bool
+except ModuleNotFoundError:  # pragma: no cover - direct script execution path
+    from _cli_utils import ensure_repo_root_on_path, parse_bool
 
-# Ensure repository root is importable when running as a script.
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+ensure_repo_root_on_path(__file__)
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -72,15 +71,6 @@ class _RateLimiter:
 
         if sleep_for > 0:
             time.sleep(sleep_for)
-
-
-def _parse_bool(value: str) -> bool:
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "t", "yes", "y", "on"}:
-        return True
-    if normalized in {"0", "false", "f", "no", "n", "off"}:
-        return False
-    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
 
 
 def _normalized_text(value: Any) -> str:
@@ -157,8 +147,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-workers", type=int, default=6)
     parser.add_argument("--rps-limit", type=float, default=6.0)
-    parser.add_argument("--infer-venue", type=_parse_bool, default=True)
-    parser.add_argument("--reset-future-placeholders", type=_parse_bool, default=True)
+    parser.add_argument("--infer-venue", type=parse_bool, default=True)
+    parser.add_argument("--reset-future-placeholders", type=parse_bool, default=True)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return parser.parse_args()
 

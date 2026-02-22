@@ -1,4 +1,4 @@
-"""Feature engineering helpers for WHL Predictor V2 training."""
+"""Feature engineering helpers for CHL league model training."""
 
 from __future__ import annotations
 

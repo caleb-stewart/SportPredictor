@@ -1,4 +1,4 @@
-"""Train, evaluate, and optionally promote WHL Predictor V2 model artifacts."""
+"""Train, evaluate, and optionally promote CHL league-scoped model artifacts."""
 
 from __future__ import annotations
 

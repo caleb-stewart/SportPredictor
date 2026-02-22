@@ -4,7 +4,6 @@ import datetime as dt
 import logging
 import uuid
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -12,7 +11,6 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from db.models import ChlMaintenanceCheckpoint, ChlMaintenanceRun
 from services.data_backend import (
-    CHL_LEAGUES,
     DataBackendError,
     primary_store,
     require_supported_league_code,
@@ -24,6 +22,7 @@ from services.prediction_pipeline import (
     update_completed_games,
     upsert_upcoming_schedule,
 )
+from services.league_time import league_today as _shared_league_today
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,14 +40,7 @@ class MaintenanceRunFailedError(MaintenanceError):
 
 
 def _league_today(league_code: str, *, now_utc: dt.datetime | None = None) -> dt.date:
-    league_cfg = CHL_LEAGUES.get(league_code) or {}
-    timezone_name = str(league_cfg.get("timezone") or "UTC")
-    timezone = ZoneInfo(timezone_name)
-
-    now = now_utc or dt.datetime.now(dt.timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=dt.timezone.utc)
-    return now.astimezone(timezone).date()
+    return _shared_league_today(league_code, now_utc=now_utc)
 
 
 def _empty_totals() -> dict[str, int]:

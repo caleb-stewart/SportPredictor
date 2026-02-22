@@ -95,6 +95,31 @@ def test_predictor_missing_k_raises(monkeypatch):
         predictor.predict_from_payload(payload)
 
 
+def test_predictor_missing_metric_preserves_contract_message(monkeypatch):
+    bundle = {
+        "model_version": "test-v2",
+        "model_family": "whl_v2_hybrid_logistic_stacker",
+        "base_models": {"5": ConstantModel(0.61), "10": ConstantModel(0.63), "15": ConstantModel(0.65)},
+        "meta_model": ConstantModel(0.64),
+    }
+    monkeypatch.setattr(predictor, "load_active_model", lambda: bundle)
+
+    bad_home = base_stats(3.9, 2.1, 32.0)
+    bad_home.pop("goals_for_avg")
+    payload = {
+        "home_team_id": 215,
+        "away_team_id": 206,
+        "features_by_k": {
+            "5": {"home": bad_home, "away": base_stats(3.0, 2.9, 28.0)},
+            "10": {"home": base_stats(3.7, 2.3, 31.0), "away": base_stats(3.1, 2.8, 29.0)},
+            "15": {"home": base_stats(3.5, 2.5, 30.0), "away": base_stats(2.9, 2.9, 28.0)},
+        },
+    }
+
+    with pytest.raises(predictor.PayloadContractError, match="Missing required metric 'home.goals_for_avg'"):
+        predictor.predict_from_payload(payload)
+
+
 def test_predictor_v3_branches_use_context(monkeypatch):
     bundle = {
         "model_version": "test-v3",

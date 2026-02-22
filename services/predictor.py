@@ -12,10 +12,11 @@ import numpy as np
 from core.config import settings
 from services.data_backend import normalize_league_code
 from services.training_features import (
-    BASE_METRICS,
-    FEATURE_COLUMNS,
+    FeatureContractError,
     GOALS_BRANCH_FEATURE_COLUMNS,
     K_VALUES,
+    build_pairwise_features as _shared_build_pairwise_features,
+    feature_vector_from_engineered as _shared_feature_vector_from_engineered,
 )
 
 
@@ -133,22 +134,17 @@ def _coerce_float(value: Any, field_name: str) -> float:
 
 
 def _build_pairwise_features(home_metrics: dict[str, Any], away_metrics: dict[str, Any]) -> dict[str, float]:
-    engineered: dict[str, float] = {}
-    for metric in BASE_METRICS:
-        h_val = _coerce_float(home_metrics.get(metric), f"home.{metric}")
-        a_val = _coerce_float(away_metrics.get(metric), f"away.{metric}")
-        engineered[f"{metric}_diff"] = h_val - a_val
-        engineered[f"{metric}_sum"] = (h_val + a_val) / 2.0
-    return engineered
+    try:
+        return _shared_build_pairwise_features(home_metrics, away_metrics)
+    except FeatureContractError as exc:
+        raise PayloadContractError(str(exc)) from exc
 
 
 def _feature_vector(engineered: dict[str, float]) -> list[float]:
-    values: list[float] = []
-    for col in FEATURE_COLUMNS:
-        if col not in engineered:
-            raise PayloadContractError(f"Missing engineered feature '{col}'.")
-        values.append(float(engineered[col]))
-    return values
+    try:
+        return _shared_feature_vector_from_engineered(engineered)
+    except FeatureContractError as exc:
+        raise PayloadContractError(str(exc)) from exc
 
 
 def _context_vector(context_features: dict[str, Any], columns: list[str], field_prefix: str = "context") -> list[float]:

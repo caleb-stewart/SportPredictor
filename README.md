@@ -104,6 +104,7 @@ uvicorn main:app --reload --port 3141
 - `GET /leagues`
 - `GET /leagues/{league_code}/teams`
 - `GET /leagues/{league_code}/predicted-games`
+- `GET /leagues/{league_code}/predictions/results/by-day`
 - `GET /leagues/{league_code}/reports/daily`
 - `GET /leagues/{league_code}/reports/daily/{prediction_date}`
 - `GET /leagues/{league_code}/games/{game_id}`
@@ -129,7 +130,7 @@ Timezone: `America/Los_Angeles`
 Manual daily run:
 
 ```bash
-python scripts/run_daily_pipeline.py
+python -m scripts.run_daily_pipeline
 ```
 
 Manual local catch-up refresh (league-scoped, guarded by `LOCAL_MAINTENANCE_REFRESH_ENABLED=true`):
@@ -142,14 +143,14 @@ curl "http://localhost:3141/leagues/ohl/maintenance/status"
 Historical CHL backfill (season-based, resumable):
 
 ```bash
-python scripts/backfill_chl_history.py --leagues ohl,lhjmq --dry-run
-python scripts/backfill_chl_history.py --leagues ohl,lhjmq --all-available-seasons true --include-regular true --include-playoffs true --include-preseason true
+python -m scripts.backfill_chl_history --leagues ohl,lhjmq --dry-run
+python -m scripts.backfill_chl_history --leagues ohl,lhjmq --all-available-seasons true --include-regular true --include-playoffs true --include-preseason true
 ```
 
 Freeze baseline proof snapshot:
 
 ```bash
-python scripts/freeze_proof_baseline.py \
+python -m scripts.freeze_proof_baseline \
   --candidate-model-version 20260217T025309Z \
   --baseline-model-version 20260214T185052Z \
   --date-from 2023-09-01 \
@@ -159,7 +160,7 @@ python scripts/freeze_proof_baseline.py \
 
 ## Model Artifacts
 
-Stored under `model_store/whl_v2/`:
+Stored under `model_store/whl_v2/` with league subdirectories:
 - versioned bundles (`model_bundle.joblib`, `metrics.json`, `metadata.json`)
 - `active_model.json`
 - `pending_model.json`

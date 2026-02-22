@@ -3,13 +3,23 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sys
-from pathlib import Path
 
-# Ensure repository root is importable when running as a script.
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+try:
+    from scripts._cli_utils import (
+        configure_script_logging,
+        ensure_repo_root_on_path,
+        parse_bool,
+        parse_csv_list,
+    )
+except ModuleNotFoundError:  # pragma: no cover - direct script execution path
+    from _cli_utils import (
+        configure_script_logging,
+        ensure_repo_root_on_path,
+        parse_bool,
+        parse_csv_list,
+    )
+
+ensure_repo_root_on_path(__file__)
 
 from db.session import SessionLocal
 from services.chl_history_ingest import ChlHistoryIngestError, run_chl_history_backfill
@@ -17,49 +27,27 @@ from services.chl_history_ingest import ChlHistoryIngestError, run_chl_history_b
 LOGGER = logging.getLogger("chl_history_backfill")
 
 
-def _parse_bool(value: str) -> bool:
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "t", "yes", "y", "on"}:
-        return True
-    if normalized in {"0", "false", "f", "no", "n", "off"}:
-        return False
-    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
-
-
-def _parse_leagues(value: str) -> list[str]:
-    leagues = [item.strip() for item in value.split(",") if item.strip()]
-    if not leagues:
-        raise argparse.ArgumentTypeError("At least one league code is required")
-    return leagues
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Backfill CHL historical data using HockeyTech season endpoints.")
-    parser.add_argument("--leagues", type=_parse_leagues, default=["ohl", "lhjmq"], help="Comma-separated league codes, e.g. ohl,lhjmq")
-    parser.add_argument("--all-available-seasons", type=_parse_bool, default=True)
-    parser.add_argument("--include-regular", type=_parse_bool, default=True)
-    parser.add_argument("--include-playoffs", type=_parse_bool, default=True)
-    parser.add_argument("--include-preseason", type=_parse_bool, default=True)
+    parser.add_argument("--leagues", type=lambda v: parse_csv_list(v, label="league code"), default=["ohl", "lhjmq"], help="Comma-separated league codes, e.g. ohl,lhjmq")
+    parser.add_argument("--all-available-seasons", type=parse_bool, default=True)
+    parser.add_argument("--include-regular", type=parse_bool, default=True)
+    parser.add_argument("--include-playoffs", type=parse_bool, default=True)
+    parser.add_argument("--include-preseason", type=parse_bool, default=True)
     parser.add_argument("--resume-run-id", default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-workers", type=int, default=None)
     parser.add_argument("--rps-limit", type=float, default=None)
     parser.add_argument("--retry-max", type=int, default=None)
-    parser.add_argument("--recompute-rolling", type=_parse_bool, default=True)
-    parser.add_argument("--train-after", type=_parse_bool, default=False)
+    parser.add_argument("--recompute-rolling", type=parse_bool, default=True)
+    parser.add_argument("--train-after", type=parse_bool, default=False)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
-    )
-    if args.log_level != "DEBUG":
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
+    configure_script_logging(args.log_level, quiet_http_clients=True)
     LOGGER.info(
         "Starting CHL history backfill leagues=%s dry_run=%s",
         args.leagues,

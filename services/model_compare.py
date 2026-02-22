@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import math
 import uuid
 from pathlib import Path
 from typing import Any
@@ -14,6 +13,11 @@ from sqlalchemy.orm import Session
 from db.models import ChlGame, ChlModelCompareRun
 from services.feature_builder import InsufficientHistoryError, TeamNotFoundError, build_features_by_k
 from services.predictor import ModelNotAvailableError, PayloadContractError, load_model_bundle_by_version, predict_from_payload
+from services.stats_utils import (
+    binary_metrics as _shared_binary_metrics,
+    bootstrap_accuracy_delta_ci as _shared_bootstrap_accuracy_delta_ci,
+    mcnemar_p_value as _shared_mcnemar_p_value,
+)
 from services.data_backend import (
     DataBackendError,
     primary_store,
@@ -62,46 +66,15 @@ def _resolve_date_bounds(db: Session, league_id: int, date_from: dt.date | None,
 
 
 def _binary_metrics(y_true: np.ndarray, probs: np.ndarray) -> dict[str, float]:
-    y = y_true.astype(int)
-    p = np.clip(probs.astype(float), 1e-6, 1 - 1e-6)
-    pred = (p >= 0.5).astype(int)
-    return {
-        "accuracy": float(np.mean(pred == y)),
-        "log_loss": float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p))),
-        "brier": float(np.mean((p - y) ** 2)),
-    }
+    return _shared_binary_metrics(y_true, probs)
 
 
 def _mcnemar_p_value(old_correct: np.ndarray, new_correct: np.ndarray) -> dict[str, Any]:
-    b = int(np.sum((old_correct == 1) & (new_correct == 0)))
-    c = int(np.sum((old_correct == 0) & (new_correct == 1)))
-    n = b + c
-    if n == 0:
-        return {"b": b, "c": c, "n": 0, "p_value": 1.0, "method": "degenerate"}
-
-    chi2_cc = ((abs(b - c) - 1.0) ** 2) / float(n)
-    p_value = float(math.erfc(math.sqrt(max(chi2_cc, 0.0) / 2.0)))
-    return {"b": b, "c": c, "n": n, "p_value": min(1.0, p_value), "method": "chi_square_cc"}
+    return _shared_mcnemar_p_value(old_correct, new_correct)
 
 
 def _bootstrap_ci(old_correct: np.ndarray, new_correct: np.ndarray, samples: int = 2000, seed: int = 42) -> dict[str, Any]:
-    n = len(old_correct)
-    if n == 0:
-        return {"samples": samples, "seed": seed, "ci95_low": None, "ci95_high": None, "delta_mean": 0.0}
-
-    rng = np.random.default_rng(seed)
-    deltas = np.empty(samples, dtype=float)
-    for i in range(samples):
-        idx = rng.integers(0, n, size=n)
-        deltas[i] = float(np.mean(new_correct[idx]) - np.mean(old_correct[idx]))
-    ci_low, ci_high = np.quantile(deltas, [0.025, 0.975]).tolist()
-    return {
-        "samples": samples,
-        "seed": seed,
-        "ci95_low": float(ci_low),
-        "ci95_high": float(ci_high),
-        "delta_mean": float(np.mean(deltas)),
-    }
+    return _shared_bootstrap_accuracy_delta_ci(old_correct, new_correct, samples=samples, seed=seed)
 
 
 def _build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:

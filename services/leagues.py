@@ -4,13 +4,13 @@ import datetime as dt
 import math
 from collections import defaultdict
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, asc, desc, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from db.models import ChlGame, ChlPredictionRecord, ChlTeam
 from services.data_backend import CHL_LEAGUES, DataBackendError, require_supported_league_code
+from services.league_time import league_today as _shared_league_today
 
 SUPPORTED_LEAGUES = [
     {
@@ -102,14 +102,7 @@ def _prediction_datetime_bounds(
 
 def _league_today(league_code: str, now_utc: dt.datetime | None = None) -> dt.date:
     normalized = _ensure_league(league_code)
-    league_cfg = CHL_LEAGUES.get(normalized) or {}
-    timezone_name = str(league_cfg.get("timezone") or "UTC")
-    timezone = ZoneInfo(timezone_name)
-
-    now = now_utc or dt.datetime.now(dt.timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=dt.timezone.utc)
-    return now.astimezone(timezone).date()
+    return _shared_league_today(normalized, now_utc=now_utc)
 
 
 def _game_date_value(item: dict[str, Any]) -> dt.date | None:
