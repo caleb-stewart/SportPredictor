@@ -1,0 +1,9 @@
+{
+  "bundle_path": "/home/caleb/Projects/SportPredictor/model_store/whl_v4/20261003T000000Z/model_bundle.joblib",
+  "gates_passed": false,
+  "metrics_path": "/home/caleb/Projects/SportPredictor/model_store/whl_v4/20261003T000000Z/metrics.json",
+  "model_family": "whl_v4_dynamic_hierarchical",
+  "model_version": "20261003T000000Z",
+  "promotion_requires_explicit_review": true,
+  "trained_at_utc": "2026-10-03T20:38:44Z"
+}

@@ -19,6 +19,7 @@ from services.training_features import (
     build_pairwise_features as _shared_build_pairwise_features,
     feature_vector_from_engineered as _shared_feature_vector_from_engineered,
 )
+from services.v4_models import v4_probability_from_context
 
 
 class PredictorError(RuntimeError):
@@ -317,6 +318,39 @@ def _build_goals_branch_features(
 
 
 def _predict_with_bundle(payload: dict[str, Any], bundle: dict[str, Any]) -> dict[str, Any]:
+    v4_meta_model = bundle.get("v4_meta_model")
+    if v4_meta_model is not None or str(bundle.get("model_family", "")).startswith("whl_v4_"):
+        context_features = payload.get("context_features")
+        if not isinstance(context_features, dict):
+            raise PayloadContractError("V4 model payload must include 'context_features'.")
+        try:
+            v4 = v4_probability_from_context(context_features, combiner=v4_meta_model)
+        except KeyError as exc:
+            raise PayloadContractError(f"Missing required V4 context feature '{exc.args[0]}'.") from exc
+
+        home_team_id = payload.get("home_team_id")
+        away_team_id = payload.get("away_team_id")
+        final_home_prob = float(v4["home_prob"])
+        predicted_winner_id = home_team_id if final_home_prob >= 0.5 else away_team_id
+        active_meta = bundle.get("_active_metadata") or {}
+        return {
+            "home_team_prob": final_home_prob,
+            "away_team_prob": float(v4["away_prob"]),
+            "predicted_winner_id": predicted_winner_id,
+            "model_version": active_meta.get("model_version") or bundle.get("model_version"),
+            "model_family": active_meta.get("model_family") or bundle.get("model_family"),
+            "k_components": {
+                "v4_rating": {
+                    "home_team_prob": v4["v4_rating_home_prob"],
+                    "away_team_prob": 1.0 - v4["v4_rating_home_prob"],
+                },
+                "v4_goal_distribution": {
+                    "home_team_prob": v4["v4_goal_home_prob"],
+                    "away_team_prob": 1.0 - v4["v4_goal_home_prob"],
+                },
+            },
+        }
+
     features_by_k = payload.get("features_by_k")
     if not isinstance(features_by_k, dict):
         raise PayloadContractError("Payload must include a 'features_by_k' object.")

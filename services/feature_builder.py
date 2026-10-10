@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
 from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session
 
@@ -16,6 +18,7 @@ from services.data_backend import (
     require_supported_league_code,
     resolve_league_id_for_store,
 )
+from services.v4_models import compute_v4_context_features, is_completed_game
 
 K_VALUES = [5, 10, 15]
 
@@ -112,6 +115,82 @@ def _latest_rolling_average(
     return db.scalar(stmt)
 
 
+def _live_rolling_average(
+    db: Session,
+    team_provider_id: int,
+    k_value: int,
+    game_date: dt.date,
+    league_code: str | None,
+) -> Any | None:
+    """Build a true pregame rolling snapshot from completed games.
+
+    Stored rolling rows are attached to the game they forecast and therefore
+    are not necessarily a postgame snapshot for a future scheduled game.  A
+    direct point-in-time query avoids serving the previous game's pregame
+    state when the current game has not yet been played.
+    """
+    _, store, league_id = _resolve_store(db, league_code)
+    game_model = store.game_model
+    stmt = (
+        select(game_model)
+        .where(
+            game_model.game_date.is_not(None),
+            game_model.game_date < game_date,
+            or_(
+                game_model.home_team_id == team_provider_id,
+                game_model.away_team_id == team_provider_id,
+            ),
+        )
+        .order_by(game_model.game_date.desc(), game_model.game_id.desc())
+        .limit(max(k_value * 4, k_value + 5))
+    )
+    stmt = apply_league_scope(stmt, game_model, league_id)
+    rows = db.scalars(stmt).all()
+    values: dict[str, list[float]] = {
+        "goals_for_avg": [],
+        "goals_against_avg": [],
+        "shots_for_avg": [],
+        "shots_against_avg": [],
+        "power_play_percentage_avg": [],
+        "power_play_percentage_against_avg": [],
+        "faceoff_win_percentage_avg": [],
+        "faceoff_win_percentage_against_avg": [],
+    }
+    for row in rows:
+        if not is_completed_game(getattr(row, "status", None), league_code):
+            continue
+        is_home = row.home_team_id == team_provider_id
+        selected = {
+            "goals_for_avg": row.home_goal_count if is_home else row.away_goal_count,
+            "goals_against_avg": row.away_goal_count if is_home else row.home_goal_count,
+            "shots_for_avg": row.home_shots_on_goal_total if is_home else row.away_shots_on_goal_total,
+            "shots_against_avg": row.away_shots_on_goal_total if is_home else row.home_shots_on_goal_total,
+            "power_play_percentage_avg": row.home_power_play_percentage if is_home else row.away_power_play_percentage,
+            "power_play_percentage_against_avg": row.away_power_play_percentage if is_home else row.home_power_play_percentage,
+            "faceoff_win_percentage_avg": row.home_faceoff_win_percentage if is_home else row.away_faceoff_win_percentage,
+            "faceoff_win_percentage_against_avg": row.away_faceoff_win_percentage if is_home else row.home_faceoff_win_percentage,
+        }
+        if any(value is None for value in selected.values()):
+            continue
+        for key, value in selected.items():
+            values[key].append(float(value))
+        if len(values["goals_for_avg"]) >= k_value:
+            break
+
+    if len(values["goals_for_avg"]) < k_value:
+        return None
+    averages = {key: float(np.mean(items[:k_value])) for key, items in values.items()}
+    averages.update(
+        {
+            "goals_diff": averages["goals_for_avg"] - averages["goals_against_avg"],
+            "ppp_diff": averages["power_play_percentage_avg"] - averages["power_play_percentage_against_avg"],
+            "sog_diff": averages["shots_for_avg"] - averages["shots_against_avg"],
+            "fowp_diff": averages["faceoff_win_percentage_avg"] - averages["faceoff_win_percentage_against_avg"],
+        }
+    )
+    return SimpleNamespace(**averages)
+
+
 def _latest_rolling_average_stmt(
     team_db_id: int,
     k_value: int,
@@ -166,8 +245,20 @@ def build_features_by_k(
     features_by_k: dict[str, dict[str, dict[str, float]]] = {}
 
     for k in k_targets:
-        home_avg = _latest_rolling_average(db, context.home_team.id, k, game_date, league_code=league_code)
-        away_avg = _latest_rolling_average(db, context.away_team.id, k, game_date, league_code=league_code)
+        home_avg = _live_rolling_average(
+            db,
+            int(context.home_team.hockeytech_id),
+            k,
+            game_date,
+            league_code=league_code,
+        )
+        away_avg = _live_rolling_average(
+            db,
+            int(context.away_team.hockeytech_id),
+            k,
+            game_date,
+            league_code=league_code,
+        )
 
         if home_avg is None or away_avg is None:
             raise InsufficientHistoryError(
@@ -219,6 +310,55 @@ def build_features_by_k(
         home_team_id=home_team_hockeytech_id,
         away_team_id=away_team_hockeytech_id,
         game_date=game_date,
+    )
+
+    # V4 needs the full league history because an opponent's state changes
+    # when that opponent plays any team, not only the two teams in this
+    # matchup.  The strict date cutoff keeps the live feature snapshot aligned
+    # with the date-level embargo used by the V4 training replay.
+    v4_history_stmt = (
+        select(
+            game_model.game_id,
+            game_model.game_date,
+            game_model.home_team_id,
+            game_model.away_team_id,
+            game_model.home_goal_count,
+            game_model.away_goal_count,
+            game_model.status,
+            game_model.scoring_breakdown,
+        )
+        .where(
+            game_model.game_date.is_not(None),
+            game_model.game_date < game_date,
+            game_model.home_team_id.is_not(None),
+            game_model.away_team_id.is_not(None),
+            game_model.home_goal_count.is_not(None),
+            game_model.away_goal_count.is_not(None),
+        )
+        .order_by(game_model.game_date.asc(), game_model.game_id.asc())
+    )
+    v4_history_stmt = apply_league_scope(v4_history_stmt, game_model, league_id)
+    v4_history_rows = db.execute(v4_history_stmt).all()
+    context_features.update(
+        compute_v4_context_features(
+            historical_games=[
+                {
+                    "game_id": row.game_id,
+                    "game_date": row.game_date,
+                    "home_team_id": row.home_team_id,
+                    "away_team_id": row.away_team_id,
+                    "home_goal_count": row.home_goal_count,
+                    "away_goal_count": row.away_goal_count,
+                    "status": row.status,
+                    "scoring_breakdown": row.scoring_breakdown,
+                }
+                for row in v4_history_rows
+            ],
+            home_team_id=home_team_hockeytech_id,
+            away_team_id=away_team_hockeytech_id,
+            game_date=game_date,
+            league_code=league_code,
+        )
     )
 
     k15 = features_by_k.get("15")

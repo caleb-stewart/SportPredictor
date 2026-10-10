@@ -71,3 +71,29 @@ def test_compute_matchup_context_features_no_future_leakage():
     )
 
     assert before_second["home_games_played_pre"] < after_second["home_games_played_pre"]
+
+
+def test_build_context_feature_map_embargoes_same_calendar_date():
+    games = pd.DataFrame(
+        [
+            {
+                "game_id": 1,
+                "game_date": dt.date(2025, 1, 1),
+                "home_team_id": 10,
+                "away_team_id": 20,
+                "home_goal_count": 5,
+                "away_goal_count": 1,
+            },
+            {
+                "game_id": 2,
+                "game_date": dt.date(2025, 1, 1),
+                "home_team_id": 10,
+                "away_team_id": 30,
+                "home_goal_count": 1,
+                "away_goal_count": 4,
+            },
+        ]
+    )
+    context = build_context_feature_map(games)
+    assert context[1]["elo_home_pre"] == context[2]["elo_home_pre"]
+    assert context[1]["home_games_played_pre"] == context[2]["home_games_played_pre"]

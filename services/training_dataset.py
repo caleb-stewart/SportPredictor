@@ -11,11 +11,14 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+from sqlalchemy.engine import make_url
 
 from core.config import settings
 from services.data_backend import CHL_LEAGUES, normalize_league_code
 from services.context_features import build_context_feature_map
 from services.training_features import FEATURE_COLUMNS, K_VALUES, build_pairwise_features
+
+_DATABASE_URL = make_url(settings.database_url)
 
 CANONICAL_SQL_CHL_TEMPLATE = """
 SELECT
@@ -69,6 +72,10 @@ JOIN chl_rolling_averages a
 WHERE g.game_date IS NOT NULL
   AND g.home_goal_count IS NOT NULL
   AND g.away_goal_count IS NOT NULL
+  AND (
+    LOWER(TRIM(COALESCE(g.status, ''))) LIKE 'final%'
+    OR (g.league_id = 1 AND TRIM(COALESCE(g.status, '')) = '4')
+  )
   AND h.k_value IN (5, 10, 15)
   AND g.league_id = {league_id}
 ORDER BY g.game_date, g.game_id, h.k_value
@@ -77,11 +84,11 @@ ORDER BY g.game_date, g.game_id, h.k_value
 
 @dataclass(frozen=True)
 class DbConfig:
-    dbname: str = os.getenv("PGDATABASE", "sportpredictor_development")
-    host: str = os.getenv("PGHOST", "localhost")
-    port: str = os.getenv("PGPORT", "5432")
-    user: str = os.getenv("PGUSER", "postgres")
-    password: str = os.getenv("PGPASSWORD", "qqqq")
+    dbname: str = os.getenv("PGDATABASE") or (_DATABASE_URL.database or "sportpredictor_development")
+    host: str = os.getenv("PGHOST") or (_DATABASE_URL.host or "localhost")
+    port: str = os.getenv("PGPORT") or str(_DATABASE_URL.port or 5432)
+    user: str = os.getenv("PGUSER") or (_DATABASE_URL.username or "postgres")
+    password: str = os.getenv("PGPASSWORD") or (_DATABASE_URL.password or "")
 
 
 def _run_psql_copy(sql: str, db: DbConfig) -> str:

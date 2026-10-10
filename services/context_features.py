@@ -137,45 +137,53 @@ def build_context_feature_map(games_frame: pd.DataFrame) -> dict[int, dict[str, 
     if missing:
         raise ValueError(f"Missing required columns for context features: {sorted(missing)}")
 
-    ordered = games_frame.sort_values(["game_date", "game_id"]).reset_index(drop=True)
+    ordered = games_frame.sort_values(["game_date", "game_id"]).reset_index(drop=True).copy()
+    ordered["game_date"] = pd.to_datetime(ordered["game_date"])
     states: dict[int, TeamState] = defaultdict(TeamState)
     context_by_game_id: dict[int, dict[str, float]] = {}
 
-    for _, row in ordered.iterrows():
-        if pd.isna(row["game_date"]) or pd.isna(row["home_team_id"]) or pd.isna(row["away_team_id"]):
-            continue
+    # Use a calendar-date embargo.  The historical data does not provide a
+    # reliable start timestamp for every game, so an earlier game_id on the
+    # same date cannot safely be treated as known when forecasting a later one.
+    for _, date_group in ordered.groupby(ordered["game_date"].dt.date, sort=True):
+        pending_updates: list[tuple[TeamState, TeamState, dt.date, int | None]] = []
+        for _, row in date_group.iterrows():
+            if pd.isna(row["home_team_id"]) or pd.isna(row["away_team_id"]):
+                continue
 
-        game_date = pd.Timestamp(row["game_date"]).date()
-        home_team_id = int(row["home_team_id"])
-        away_team_id = int(row["away_team_id"])
-        game_id = int(row["game_id"])
+            game_date = pd.Timestamp(row["game_date"]).date()
+            home_team_id = int(row["home_team_id"])
+            away_team_id = int(row["away_team_id"])
+            game_id = int(row["game_id"])
 
-        home_state = states[home_team_id]
-        away_state = states[away_team_id]
+            home_state = states[home_team_id]
+            away_state = states[away_team_id]
 
-        if home_state.pregame_elo_history is not None:
-            home_state.pregame_elo_history.append(float(home_state.elo))
-        if away_state.pregame_elo_history is not None:
-            away_state.pregame_elo_history.append(float(away_state.elo))
+            if home_state.pregame_elo_history is not None:
+                home_state.pregame_elo_history.append(float(home_state.elo))
+            if away_state.pregame_elo_history is not None:
+                away_state.pregame_elo_history.append(float(away_state.elo))
 
-        context_by_game_id[game_id] = _pregame_context(
-            home_state=home_state,
-            away_state=away_state,
-            game_date=game_date,
-        )
+            context_by_game_id[game_id] = _pregame_context(
+                home_state=home_state,
+                away_state=away_state,
+                game_date=game_date,
+            )
 
-        home_goals = row["home_goal_count"]
-        away_goals = row["away_goal_count"]
-        home_win: int | None = None
-        if not pd.isna(home_goals) and not pd.isna(away_goals):
-            home_win = 1 if int(home_goals) > int(away_goals) else 0
+            home_goals = row["home_goal_count"]
+            away_goals = row["away_goal_count"]
+            home_win: int | None = None
+            if not pd.isna(home_goals) and not pd.isna(away_goals):
+                home_win = 1 if int(home_goals) > int(away_goals) else 0
+            pending_updates.append((home_state, away_state, game_date, home_win))
 
-        _update_states_after_game(
-            home_state=home_state,
-            away_state=away_state,
-            game_date=game_date,
-            home_win=home_win,
-        )
+        for home_state, away_state, game_date, home_win in pending_updates:
+            _update_states_after_game(
+                home_state=home_state,
+                away_state=away_state,
+                game_date=game_date,
+                home_win=home_win,
+            )
 
     return context_by_game_id
 

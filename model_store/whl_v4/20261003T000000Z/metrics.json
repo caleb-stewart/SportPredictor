@@ -1,0 +1,56 @@
+{
+  "component_holdout": {
+    "dynamic_rating": {
+      "accuracy": 0.6397922312556459,
+      "auc": 0.676296704120282,
+      "brier": 0.226122584571626,
+      "games": 4428,
+      "log_loss": 0.644719592568808
+    },
+    "hierarchical_goal_distribution": {
+      "accuracy": 0.6084010840108401,
+      "auc": 0.6653204586015797,
+      "brier": 0.2431727882004845,
+      "games": 4428,
+      "log_loss": 0.6960208643557467
+    }
+  },
+  "dataset": {
+    "date_max": "2026-02-20",
+    "date_min": "1999-02-12",
+    "games_eligible": 22140,
+    "games_excluded": 88,
+    "raw_games": 22228
+  },
+  "holdout": {
+    "accuracy": 0.6368563685636857,
+    "auc": 0.6779039180110903,
+    "brier": 0.2241554625233447,
+    "games": 4428,
+    "log_loss": 0.6390694033202193
+  },
+  "home_rate_baseline_holdout": {
+    "accuracy": 0.547877145438121,
+    "auc": 0.5,
+    "brier": 0.24805809063500167,
+    "games": 4428,
+    "log_loss": 0.6892667492925346
+  },
+  "meta_columns": [
+    "v4_rating_home_prob",
+    "v4_goal_home_prob"
+  ],
+  "model_family": "whl_v4_dynamic_hierarchical",
+  "split": {
+    "holdout_games": 4428,
+    "train_fraction": 0.8,
+    "train_games": 17712
+  },
+  "train": {
+    "accuracy": 0.6319788189248302,
+    "auc": 0.6715528513064093,
+    "brier": 0.22380324350420666,
+    "games": 17374,
+    "log_loss": 0.6382938183363973
+  }
+}
