@@ -1,0 +1,62 @@
+name: sportpredictor
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      # The file is used only when PostgreSQL is first initialized.
+      - ./data/bootstrap.sql:/docker-entrypoint-initdb.d/10-bootstrap.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      MODEL_STORE_ROOT: model_store/whl_v2
+      API_PORT: 3141
+      # The website proxies API requests on the same origin, so CORS is not
+      # needed for normal Tailnet use.
+      CORS_ORIGINS: ""
+    volumes:
+      - ./data/model_store:/app/model_store/whl_v2
+      - ./data/reports:/app/reports
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:3141/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8181}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 6

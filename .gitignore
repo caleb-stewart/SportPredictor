@@ -8,6 +8,7 @@ __pycache__/
 .pytest_cache/
 
 /backups/
+/logs/
 
 /model_store/whl_v2/*
 !/model_store/whl_v2/.keep

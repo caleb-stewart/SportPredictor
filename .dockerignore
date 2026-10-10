@@ -10,3 +10,11 @@
 /SportPredictorSpecification.txt
 /SportPredictorSpecificationFrontend.txt
 /SportPredictorTODO.txt
+
+# Production deployment artifacts that do not belong in the API image.
+/.mypy_cache/
+/reports/
+/model_store/
+*.sql
+*.dump
+/SportPredictor.code-workspace

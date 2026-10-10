@@ -1,0 +1,97 @@
+name: Deploy to Docker Ubuntu
+
+on:
+  workflow_dispatch:
+    inputs:
+      frontend_ref:
+        description: Frontend branch, tag, or SHA to deploy
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sportpredictor-homelab-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy over Tailscale
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEPLOY_HOST: docker-ubuntu.tail0da2aa.ts.net
+      DEPLOY_USER: caleb
+      DEPLOY_ROOT: /home/caleb/sportpredictor
+
+    steps:
+      - name: Check out backend
+        uses: actions/checkout@v5
+
+      - name: Check out frontend
+        uses: actions/checkout@v5
+        with:
+          repository: caleb-stewart/sport-predictor-vue
+          ref: ${{ inputs.frontend_ref }}
+          path: frontend
+          # This fine-grained token needs Contents: Read only on the frontend
+          # repository. GITHUB_TOKEN is scoped to the backend repository.
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
+
+      - name: Connect the runner to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: docker-ubuntu.tail0da2aa.ts.net
+
+      - name: Configure deploy-only SSH access
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          cat >> ~/.ssh/known_hosts <<'EOF'
+          docker-ubuntu.tail0da2aa.ts.net ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILr1Zd3VZKzMhpXf3rLins9fskaxZ07rJnCOkspDguCg
+          EOF
+          chmod 600 ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes "${DEPLOY_USER}@${DEPLOY_HOST}" 'docker --version'
+
+      - name: Sync source and Compose definition
+        run: |
+          set -euo pipefail
+          remote="${DEPLOY_USER}@${DEPLOY_HOST}"
+          ssh -o BatchMode=yes "$remote" "mkdir -p '${DEPLOY_ROOT}/backend' '${DEPLOY_ROOT}/frontend'"
+
+          rsync -az --delete \
+            --exclude '.git/' --exclude '.env' --exclude '.venv/' --exclude '__pycache__/' \
+            --exclude '.pytest_cache/' --exclude 'backups/' --exclude 'reports/' \
+            --exclude 'model_store/' --exclude 'frontend/' --exclude '*.sql' --exclude '*.dump' \
+            ./ "${remote}:${DEPLOY_ROOT}/backend/"
+
+          rsync -az --delete \
+            --exclude '.git/' --exclude '.env' --exclude 'node_modules/' --exclude 'dist/' \
+            frontend/ "${remote}:${DEPLOY_ROOT}/frontend/"
+
+          rsync -az deploy/compose.yaml "${remote}:${DEPLOY_ROOT}/compose.yaml"
+
+      - name: Rebuild stack and verify deployment
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "
+            set -eu
+            cd '${DEPLOY_ROOT}'
+            docker compose -f compose.yaml up -d --build --remove-orphans
+            for attempt in \$(seq 1 24); do
+              curl --fail --silent http://localhost:8181/api/health >/dev/null && exit 0
+              sleep 5
+            done
+            docker compose -f compose.yaml ps
+            docker compose -f compose.yaml logs --tail=100 api web
+            exit 1
+          "

@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qqqq}
+      POSTGRES_DB: ${POSTGRES_DB:-sportpredictor_development}
+    ports:
+      # 5433 lets this container coexist with the existing host PostgreSQL on 5432.
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - sportpredictor_postgres_data:/var/lib/postgresql/data
+      # Imported only when the named volume is initialized; the host file is read-only.
+      - ./3-28-2026-backup.sql:/docker-entrypoint-initdb.d/10-sportpredictor-backup.sql:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-sportpredictor_development}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  sportpredictor_postgres_data:
