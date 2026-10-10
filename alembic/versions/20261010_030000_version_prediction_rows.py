@@ -1,7 +1,7 @@
 """make prediction rows append-only by model version
 
 Revision ID: 20261010_030000
-Revises: 20260222_140000
+Revises: 20260911_130000
 Create Date: 2026-10-10 03:00:00.000000
 """
 
@@ -12,7 +12,7 @@ from alembic import op
 
 
 revision = "20261010_030000"
-down_revision = "20260222_140000"
+down_revision = "20260911_130000"
 branch_labels = None
 depends_on = None
 
