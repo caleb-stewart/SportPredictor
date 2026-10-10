@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     scheduler_enabled: bool = True
     scheduler_timezone: str = "America/Los_Angeles"
+    upcoming_prediction_refresh_minutes: int = Field(default=30, alias="UPCOMING_PREDICTION_REFRESH_MINUTES")
     local_maintenance_refresh_enabled: bool = Field(default=False, alias="LOCAL_MAINTENANCE_REFRESH_ENABLED")
     local_maintenance_max_catchup_days: int = Field(default=14, alias="LOCAL_MAINTENANCE_MAX_CATCHUP_DAYS")
 

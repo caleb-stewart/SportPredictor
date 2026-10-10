@@ -5,12 +5,14 @@ import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 
 from core.config import settings
 from db.models import ChlLeague
 from db.session import SessionLocal
 from services.data_backend import CHL_LEAGUES
+from services.league_time import league_today
 from services.model_compare import run_model_compare
 from services.maintenance import record_scheduler_maintenance_success
 from services.prediction_pipeline import (
@@ -52,13 +54,14 @@ def _run_db_job(fn):
 
 
 def _job_upcoming_schedule(db, league_code: str):
-    target = dt.date.today() + dt.timedelta(days=1)
-    rows = upsert_upcoming_schedule(db, target, league_code=league_code)
-    logger.info("%s upcoming schedule refreshed for %s (rows=%s)", league_code, target, rows)
+    today = league_today(league_code)
+    targets = (today, today + dt.timedelta(days=1))
+    rows = sum(upsert_upcoming_schedule(db, target, league_code=league_code) for target in targets)
+    logger.info("%s upcoming schedule refreshed for %s (rows=%s)", league_code, targets, rows)
 
 
 def _job_yesterday_updates(db, league_code: str):
-    target = dt.date.today() - dt.timedelta(days=1)
+    target = league_today(league_code) - dt.timedelta(days=1)
     rows = update_completed_games(db, target, league_code=league_code)
     logger.info("%s yesterday games refreshed for %s (rows=%s)", league_code, target, rows)
 
@@ -79,18 +82,23 @@ def _job_promote(_db, league_code: str):
 
 
 def _job_predict_upcoming(db, league_code: str):
-    target = dt.date.today() + dt.timedelta(days=1)
-    stats = run_upcoming_predictions(db, target, league_code=league_code)
-    logger.info("%s upcoming predictions done: %s", league_code, stats)
+    today = league_today(league_code)
+    targets = (today, today + dt.timedelta(days=1))
+    stats_by_date = [
+        run_upcoming_predictions(db, target, league_code=league_code)
+        for target in targets
+    ]
+    totals = {
+        "predictions_written": sum(int(stats.predictions_written) for stats in stats_by_date),
+        "skipped_games": sum(int(stats.skipped_games) for stats in stats_by_date),
+    }
+    logger.info("%s upcoming predictions done for %s: %s", league_code, targets, totals)
     try:
         checkpoint = record_scheduler_maintenance_success(
             db,
             league_code=league_code,
-            run_date=dt.date.today(),
-            totals={
-                "predictions_written": int(stats.predictions_written),
-                "skipped_games": int(stats.skipped_games),
-            },
+            run_date=today,
+            totals=totals,
         )
         logger.info(
             "%s maintenance checkpoint advanced (run_id=%s to_date=%s)",
@@ -120,7 +128,7 @@ def _job_weekly_compare(db, league_code: str):
         logger.info("weekly compare skipped: candidate equals baseline (%s).", candidate)
         return
 
-    today = dt.date.today()
+    today = league_today(league_code)
     date_to = today - dt.timedelta(days=1)
     date_from = date_to - dt.timedelta(days=max(settings.weekly_compare_lookback_days, 30))
 
@@ -177,9 +185,13 @@ def start_scheduler() -> BackgroundScheduler:
         )
         scheduler.add_job(
             lambda lc=league_code: _run_db_job(lambda db: _job_predict_upcoming(db, lc)),
-            trigger=CronTrigger(hour=9, minute=45, timezone=settings.scheduler_timezone),
+            trigger=IntervalTrigger(
+                minutes=max(15, int(settings.upcoming_prediction_refresh_minutes)),
+                timezone=settings.scheduler_timezone,
+            ),
             id=f"{league_code}_predict_upcoming",
             replace_existing=True,
+            next_run_time=dt.datetime.now(dt.UTC),
         )
         scheduler.add_job(
             lambda lc=league_code: _run_db_job(lambda db: _job_weekly_compare(db, lc)),
