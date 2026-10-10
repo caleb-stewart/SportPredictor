@@ -28,7 +28,7 @@ class Base(DeclarativeBase):
 class ChlLeague(Base):
     __tablename__ = "chl_leagues"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     code: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     sport: Mapped[str] = mapped_column(String, nullable=False, default="hockey")
@@ -43,7 +43,7 @@ class ChlLeague(Base):
 class ChlTeam(Base):
     __tablename__ = "chl_teams"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     league_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chl_leagues.id"), nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     hockeytech_id: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -64,7 +64,7 @@ class ChlTeam(Base):
 class ChlGame(Base):
     __tablename__ = "chl_games"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     league_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chl_leagues.id"), nullable=False)
     game_id: Mapped[int] = mapped_column(Integer, nullable=False)
     season_id: Mapped[Optional[str]] = mapped_column(String)
@@ -103,7 +103,7 @@ class ChlGame(Base):
 class ChlRollingAverage(Base):
     __tablename__ = "chl_rolling_averages"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     league_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chl_leagues.id"), nullable=False)
     game_id: Mapped[int] = mapped_column(Integer, nullable=False)
     team_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chl_teams.id"), nullable=False)
@@ -139,7 +139,7 @@ class ChlRollingAverage(Base):
 class ChlPredictionRecord(Base):
     __tablename__ = "chl_prediction_records"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     league_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chl_leagues.id"), nullable=False)
     game_id: Mapped[int] = mapped_column(Integer, nullable=False)
     k_value: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -367,6 +367,74 @@ class ChlMaintenanceCheckpoint(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
 
 
+class MarketDataProvider(Base):
+    __tablename__ = "market_data_providers"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
+
+
+class MarketDataEvent(Base):
+    __tablename__ = "market_data_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("market_data_providers.id"), nullable=False)
+    provider_event_id: Mapped[str] = mapped_column(String, nullable=False)
+    sport_key: Mapped[str] = mapped_column(String, nullable=False)
+    sport_title: Mapped[Optional[str]] = mapped_column(String)
+    commence_time: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True))
+    home_team: Mapped[Optional[str]] = mapped_column(String)
+    away_team: Mapped[Optional[str]] = mapped_column(String)
+    first_seen_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
+    last_seen_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
+    latest_payload: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+
+    __table_args__ = (
+        UniqueConstraint("provider_id", "provider_event_id", name="uq_market_data_events_provider_event"),
+    )
+
+
+class MarketDataQuote(Base):
+    __tablename__ = "market_data_quotes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("market_data_events.id"), nullable=False)
+    bookmaker_key: Mapped[str] = mapped_column(String, nullable=False)
+    bookmaker_title: Mapped[Optional[str]] = mapped_column(String)
+    market_key: Mapped[str] = mapped_column(String, nullable=False)
+    outcome_name: Mapped[str] = mapped_column(String, nullable=False)
+    outcome_description: Mapped[Optional[str]] = mapped_column(String)
+    point: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 3))
+    decimal_price: Mapped[Decimal] = mapped_column(Numeric(12, 5), nullable=False)
+    source_updated_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True))
+    captured_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
+    is_live: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    raw_quote: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+
+
+class MarketDataIngestionRun(Base):
+    __tablename__ = "market_data_ingestion_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider_code: Mapped[str] = mapped_column(String, nullable=False)
+    operation: Mapped[str] = mapped_column(String, nullable=False)
+    sport_key: Mapped[Optional[str]] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
+    completed_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True))
+    events_written: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    quotes_written: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    quota_remaining: Mapped[Optional[int]] = mapped_column(Integer)
+    quota_used: Mapped[Optional[int]] = mapped_column(Integer)
+    quota_cost: Mapped[Optional[int]] = mapped_column(Integer)
+    details: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    error_text: Mapped[Optional[str]] = mapped_column(String)
+
+
 Index(
     "idx_chl_prediction_records_archive_archive_run_id",
     ChlPredictionRecordArchive.archive_run_id,
@@ -387,3 +455,7 @@ Index("idx_chl_ingest_failures_run_id", ChlIngestGameFailure.run_id)
 Index("idx_chl_ingest_failures_league_game", ChlIngestGameFailure.league_id, ChlIngestGameFailure.game_id)
 Index("idx_chl_maintenance_runs_league_started_at", ChlMaintenanceRun.league_id, ChlMaintenanceRun.started_at)
 Index("idx_chl_maintenance_runs_status_completed_at", ChlMaintenanceRun.status, ChlMaintenanceRun.completed_at)
+Index("idx_market_data_events_sport_commence", MarketDataEvent.sport_key, MarketDataEvent.commence_time)
+Index("idx_market_data_quotes_event_captured", MarketDataQuote.event_id, MarketDataQuote.captured_at)
+Index("idx_market_data_quotes_book_market_captured", MarketDataQuote.bookmaker_key, MarketDataQuote.market_key, MarketDataQuote.captured_at)
+Index("idx_market_data_ingestion_runs_provider_started", MarketDataIngestionRun.provider_code, MarketDataIngestionRun.started_at)

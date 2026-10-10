@@ -12,9 +12,9 @@ from core.config import settings
 from db.models import ChlLeague
 from db.session import SessionLocal
 from services.data_backend import CHL_LEAGUES
-from services.league_time import league_today
 from services.model_compare import run_model_compare
 from services.maintenance import record_scheduler_maintenance_success
+from services.league_time import league_today
 from services.prediction_pipeline import (
     recompute_rolling_averages,
     run_upcoming_predictions,
@@ -23,6 +23,7 @@ from services.prediction_pipeline import (
 )
 from services.predictor import get_model_status
 from services.training import promote_staged_model, train_and_maybe_promote
+from services.the_odds_api import TheOddsApiError, sync_current_odds
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,9 @@ def _run_db_job(fn):
 
 
 def _job_upcoming_schedule(db, league_code: str):
-    today = league_today(league_code)
-    targets = (today, today + dt.timedelta(days=1))
-    rows = sum(upsert_upcoming_schedule(db, target, league_code=league_code) for target in targets)
-    logger.info("%s upcoming schedule refreshed for %s (rows=%s)", league_code, targets, rows)
+    target = league_today(league_code) + dt.timedelta(days=1)
+    rows = upsert_upcoming_schedule(db, target, league_code=league_code)
+    logger.info("%s upcoming schedule refreshed for %s (rows=%s)", league_code, target, rows)
 
 
 def _job_yesterday_updates(db, league_code: str):
@@ -90,22 +90,18 @@ def _job_promote(_db, league_code: str):
 
 def _job_predict_upcoming(db, league_code: str):
     today = league_today(league_code)
-    targets = (today, today + dt.timedelta(days=1))
-    stats_by_date = [
-        run_upcoming_predictions(db, target, league_code=league_code)
-        for target in targets
-    ]
-    totals = {
-        "predictions_written": sum(int(stats.predictions_written) for stats in stats_by_date),
-        "skipped_games": sum(int(stats.skipped_games) for stats in stats_by_date),
-    }
-    logger.info("%s upcoming predictions done for %s: %s", league_code, targets, totals)
+    target = today + dt.timedelta(days=1)
+    stats = run_upcoming_predictions(db, target, league_code=league_code)
+    logger.info("%s upcoming predictions done: %s", league_code, stats)
     try:
         checkpoint = record_scheduler_maintenance_success(
             db,
             league_code=league_code,
             run_date=today,
-            totals=totals,
+            totals={
+                "predictions_written": int(stats.predictions_written),
+                "skipped_games": int(stats.skipped_games),
+            },
         )
         logger.info(
             "%s maintenance checkpoint advanced (run_id=%s to_date=%s)",
@@ -151,6 +147,22 @@ def _job_weekly_compare(db, league_code: str):
     logger.info("%s weekly model compare complete: %s", league_code, result)
 
 
+def _job_current_market_odds(db) -> None:
+    if not settings.the_odds_api_current_sync_enabled:
+        return
+    if not settings.the_odds_api_key:
+        logger.info("The Odds API current sync skipped: THE_ODDS_API_KEY is not configured.")
+        return
+
+    sports = [item.strip() for item in settings.the_odds_api_current_sports.split(",") if item.strip()]
+    for sport_key in sports:
+        try:
+            result = sync_current_odds(db, sport_key)
+            logger.info("The Odds API current sync complete: %s", result.as_dict())
+        except TheOddsApiError as exc:
+            logger.warning("The Odds API current sync failed for %s: %s", sport_key, exc)
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
 
@@ -192,13 +204,9 @@ def start_scheduler() -> BackgroundScheduler:
         )
         scheduler.add_job(
             lambda lc=league_code: _run_db_job(lambda db: _job_predict_upcoming(db, lc)),
-            trigger=IntervalTrigger(
-                minutes=max(15, int(settings.upcoming_prediction_refresh_minutes)),
-                timezone=settings.scheduler_timezone,
-            ),
+            trigger=CronTrigger(hour=9, minute=45, timezone=settings.scheduler_timezone),
             id=f"{league_code}_predict_upcoming",
             replace_existing=True,
-            next_run_time=dt.datetime.now(dt.UTC),
         )
         scheduler.add_job(
             lambda lc=league_code: _run_db_job(lambda db: _job_weekly_compare(db, lc)),
@@ -206,6 +214,14 @@ def start_scheduler() -> BackgroundScheduler:
             id=f"{league_code}_model_weekly_compare",
             replace_existing=True,
         )
+
+    interval_minutes = max(15, int(settings.the_odds_api_current_sync_interval_minutes))
+    scheduler.add_job(
+        lambda: _run_db_job(_job_current_market_odds),
+        trigger=IntervalTrigger(minutes=interval_minutes, timezone=settings.scheduler_timezone),
+        id="the_odds_api_current_sync",
+        replace_existing=True,
+    )
 
     scheduler.start()
     _scheduler = scheduler
