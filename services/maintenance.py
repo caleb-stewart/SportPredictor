@@ -202,6 +202,7 @@ def record_scheduler_maintenance_success(
         updated_at=now,
     )
     db.add(run_row)
+    db.flush()
     _update_checkpoint(db, league_id=league_id, run_id=run_row.id, successful_date=run_date)
     db.commit()
     return _serialize_run(run_row, normalized)

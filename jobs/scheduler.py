@@ -34,7 +34,14 @@ def _active_league_codes() -> list[str]:
     try:
         rows = db.scalars(select(ChlLeague).where(ChlLeague.active.is_(True)).order_by(ChlLeague.code.asc())).all()
         if rows:
-            return [str(row.code).lower() for row in rows]
+            supported = set(CHL_LEAGUES)
+            active = [str(row.code).lower() for row in rows]
+            ignored = sorted(set(active) - supported)
+            if ignored:
+                logger.warning("Ignoring active leagues unsupported by the CHL backend: %s", ignored)
+            supported_active = [code for code in active if code in supported]
+            if supported_active:
+                return supported_active
     except Exception:  # noqa: BLE001
         logger.exception("Failed to load active leagues from chl_leagues; using defaults.")
     finally:
