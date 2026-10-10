@@ -83,6 +83,51 @@ def test_league_today_respects_league_timezones():
     assert leagues_service._league_today("ohl", now_utc=now_utc) == dt.date(2026, 2, 22)
 
 
+def test_apply_prediction_detail_options_drops_k_breakdown_when_disabled():
+    base_items = [
+        {
+            "game_id": 1,
+            "predictions_by_k": [
+                {
+                    "k_value": 15,
+                    "raw_model_outputs": {"signal": 0.9},
+                }
+            ],
+        }
+    ]
+
+    shaped = leagues_service._apply_prediction_detail_options(
+        base_items,
+        include_k_breakdown=False,
+        include_raw_model_outputs=False,
+    )
+
+    assert shaped[0]["predictions_by_k"] == []
+
+
+def test_apply_prediction_detail_options_hides_raw_outputs_when_not_requested():
+    base_items = [
+        {
+            "game_id": 1,
+            "predictions_by_k": [
+                {
+                    "k_value": 15,
+                    "raw_model_outputs": {"signal": 0.9},
+                }
+            ],
+        }
+    ]
+
+    shaped = leagues_service._apply_prediction_detail_options(
+        base_items,
+        include_k_breakdown=True,
+        include_raw_model_outputs=False,
+    )
+
+    assert shaped[0]["predictions_by_k"][0]["k_value"] == 15
+    assert shaped[0]["predictions_by_k"][0]["raw_model_outputs"] is None
+
+
 def test_get_next_predicted_slate_selects_earliest_future_game_date(monkeypatch):
     items = [
         _game_item(

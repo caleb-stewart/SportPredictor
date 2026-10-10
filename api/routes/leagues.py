@@ -168,6 +168,8 @@ def league_predicted_games(
     limit: int = Query(default=200, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
     sort: str = Query(default="prediction_date_desc", description="prediction_date_desc|prediction_date_asc|game_date_desc|game_date_asc"),
+    include_k_breakdown: bool = Query(default=False),
+    include_raw_model_outputs: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> list[PredictedGameResponse]:
     try:
@@ -183,6 +185,8 @@ def league_predicted_games(
             limit=limit,
             offset=offset,
             sort=sort,
+            include_k_breakdown=include_k_breakdown,
+            include_raw_model_outputs=include_raw_model_outputs,
         )
     except UnknownLeagueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -197,6 +201,8 @@ def league_predictions_next_slate(
     league_code: str,
     as_of_date: dt.date | None = Query(default=None),
     team_provider_id: int | None = Query(default=None),
+    include_k_breakdown: bool = Query(default=False),
+    include_raw_model_outputs: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> NextSlateResponse:
     try:
@@ -205,6 +211,8 @@ def league_predictions_next_slate(
             league_code=league_code,
             as_of_date=as_of_date,
             team_provider_id=team_provider_id,
+            include_k_breakdown=include_k_breakdown,
+            include_raw_model_outputs=include_raw_model_outputs,
         )
     except UnknownLeagueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -221,6 +229,8 @@ def league_predictions_upcoming(
     team_provider_id: int | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
+    include_k_breakdown: bool = Query(default=False),
+    include_raw_model_outputs: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> PredictionPageResponse:
     try:
@@ -233,6 +243,8 @@ def league_predictions_upcoming(
             team_provider_id=team_provider_id,
             limit=limit,
             offset=offset,
+            include_k_breakdown=include_k_breakdown,
+            include_raw_model_outputs=include_raw_model_outputs,
         )
     except UnknownLeagueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -252,6 +264,8 @@ def league_predictions_results(
     sort: str = Query(default="game_date_desc", description="prediction_date_desc|prediction_date_asc|game_date_desc|game_date_asc"),
     limit: int = Query(default=20, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
+    include_k_breakdown: bool = Query(default=False),
+    include_raw_model_outputs: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> PredictionPageResponse:
     try:
@@ -265,6 +279,8 @@ def league_predictions_results(
             sort=sort,
             limit=limit,
             offset=offset,
+            include_k_breakdown=include_k_breakdown,
+            include_raw_model_outputs=include_raw_model_outputs,
         )
     except UnknownLeagueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -283,6 +299,8 @@ def league_predictions_results_by_day(
     result: str = Query(default="all", description="One of: all, correct, incorrect"),
     page: int = Query(default=1, ge=1),
     days_per_page: int = Query(default=3, ge=1, le=31),
+    include_k_breakdown: bool = Query(default=False),
+    include_raw_model_outputs: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> PredictionResultsByDayPageResponse:
     try:
@@ -295,6 +313,8 @@ def league_predictions_results_by_day(
             result=result,
             page=page,
             days_per_page=days_per_page,
+            include_k_breakdown=include_k_breakdown,
+            include_raw_model_outputs=include_raw_model_outputs,
         )
     except UnknownLeagueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -310,6 +330,8 @@ def league_prediction_result_recent_days(
     days: int = Query(default=3, ge=1, le=31),
     as_of_date: dt.date | None = Query(default=None),
     team_provider_id: int | None = Query(default=None),
+    include_k_breakdown: bool = Query(default=False),
+    include_raw_model_outputs: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> RecentResultDaysResponse:
     try:
@@ -319,6 +341,8 @@ def league_prediction_result_recent_days(
             days=days,
             team_provider_id=team_provider_id,
             as_of_date=as_of_date,
+            include_k_breakdown=include_k_breakdown,
+            include_raw_model_outputs=include_raw_model_outputs,
         )
     except UnknownLeagueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -359,6 +383,8 @@ def league_daily_report_detail(
     league_code: str,
     prediction_date: dt.date,
     team_provider_id: int | None = Query(default=None),
+    include_k_breakdown: bool = Query(default=False),
+    include_raw_model_outputs: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> DailyReportDetailResponse:
     try:
@@ -367,6 +393,8 @@ def league_daily_report_detail(
             league_code=league_code,
             prediction_date=prediction_date,
             team_provider_id=team_provider_id,
+            include_k_breakdown=include_k_breakdown,
+            include_raw_model_outputs=include_raw_model_outputs,
         )
     except UnknownLeagueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

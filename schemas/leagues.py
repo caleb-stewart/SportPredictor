@@ -99,16 +99,24 @@ class PredictedGameResponse(BaseModel):
     consensus_home_probability: Optional[float] = None
     consensus_away_probability: Optional[float] = None
     consensus_correct: Optional[bool]
-    resolved_count: int
-    correct_count: int
+    resolved_games_count: int = 0
+    correct_games_count: int = 0
+    resolved_predictions_count: int = 0
+    correct_predictions_count: int = 0
+    resolved_count: int = 0
+    correct_count: int = 0
 
 
 class DailyReportSummaryResponse(BaseModel):
     prediction_date: dt.date
     games_count: int
     predictions_count: int
-    resolved_count: int
-    correct_count: int
+    resolved_games_count: int = 0
+    correct_games_count: int = 0
+    resolved_predictions_count: int = 0
+    correct_predictions_count: int = 0
+    resolved_count: int = 0
+    correct_count: int = 0
     accuracy_pct: Optional[float]
 
 
@@ -150,8 +158,12 @@ class NextSlateResponse(BaseModel):
 class RecentResultDayResponse(BaseModel):
     game_date: dt.date
     games_count: int
-    resolved_count: int
-    correct_count: int
+    resolved_games_count: int = 0
+    correct_games_count: int = 0
+    resolved_predictions_count: int = 0
+    correct_predictions_count: int = 0
+    resolved_count: int = 0
+    correct_count: int = 0
     accuracy_pct: Optional[float]
     games: list[PredictedGameResponse]
 
@@ -197,6 +209,12 @@ class LeagueGameDetailResponse(BaseModel):
     consensus_home_probability: Optional[float] = None
     consensus_away_probability: Optional[float] = None
     consensus_correct: Optional[bool]
+    resolved_games_count: int = 0
+    correct_games_count: int = 0
+    resolved_predictions_count: int = 0
+    correct_predictions_count: int = 0
+    resolved_count: int = 0
+    correct_count: int = 0
 
 
 class MaintenanceRunResponse(BaseModel):
