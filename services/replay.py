@@ -99,19 +99,22 @@ def _prediction_rows_stmt(league_id: int, date_from: dt.date, date_to: dt.date):
     )
 
 
-def _prediction_rows_for_game_ids_stmt(league_id: int, game_ids: list[int]):
+def _prediction_rows_for_game_ids_stmt(league_id: int, game_ids: list[int], model_version: str | None = None):
     if not game_ids:
         return select(ChlPredictionRecord).where(
             ChlPredictionRecord.league_id == league_id,
             ChlPredictionRecord.game_id == -1,
         )
 
-    return (
+    stmt = (
         select(ChlPredictionRecord)
         .where(ChlPredictionRecord.league_id == league_id)
         .where(ChlPredictionRecord.game_id.in_(game_ids))
         .where(ChlPredictionRecord.k_value.in_(K_VALUES))
     )
+    if model_version:
+        stmt = stmt.where(ChlPredictionRecord.model_version == model_version)
+    return stmt
 
 
 def _resolve_date_bounds(
@@ -214,6 +217,11 @@ def _archive_rows(
             "away_team_probability": row.away_team_probability,
             "actual_winner_id": row.actual_winner_id,
             "correct": row.correct,
+            "ensemble_predicted_winner_id": row.ensemble_predicted_winner_id,
+            "ensemble_home_team_probability": row.ensemble_home_team_probability,
+            "ensemble_away_team_probability": row.ensemble_away_team_probability,
+            "ensemble_actual_winner_id": row.ensemble_actual_winner_id,
+            "ensemble_correct": row.ensemble_correct,
             "prediction_date": row.prediction_date,
             "model_version": row.model_version,
             "model_family": row.model_family,
@@ -377,6 +385,7 @@ def _rollback_replayed_rows(
     league_id: int,
     run_id: uuid.UUID,
     replayed_keys: set[tuple[int, int]],
+    model_version: str,
 ) -> None:
     if replayed_keys:
         key_list = list(replayed_keys)
@@ -384,6 +393,7 @@ def _rollback_replayed_rows(
             db.execute(
                 delete(ChlPredictionRecord).where(
                     ChlPredictionRecord.league_id == league_id,
+                    ChlPredictionRecord.model_version == model_version,
                     tuple_(ChlPredictionRecord.game_id, ChlPredictionRecord.k_value).in_(chunk),
                 )
             )
@@ -408,6 +418,11 @@ def _rollback_replayed_rows(
                 "away_team_probability": row.away_team_probability,
                 "actual_winner_id": row.actual_winner_id,
                 "correct": row.correct,
+                "ensemble_predicted_winner_id": row.ensemble_predicted_winner_id,
+                "ensemble_home_team_probability": row.ensemble_home_team_probability,
+                "ensemble_away_team_probability": row.ensemble_away_team_probability,
+                "ensemble_actual_winner_id": row.ensemble_actual_winner_id,
+                "ensemble_correct": row.ensemble_correct,
                 "prediction_date": row.prediction_date,
                 "model_version": row.model_version,
                 "model_family": row.model_family,
@@ -537,7 +552,13 @@ def run_frozen_model_replay(
         games_by_id = {game.game_id: game for game in games}
         selected_game_ids = [int(game.game_id) for game in games]
 
-        old_rows = db.scalars(_prediction_rows_for_game_ids_stmt(league_id, selected_game_ids)).all()
+        old_rows = db.scalars(
+            _prediction_rows_for_game_ids_stmt(
+                league_id,
+                selected_game_ids,
+                model_version=frozen_model_version,
+            )
+        ).all()
         old_rows_by_key = {
             (row.game_id, row.k_value): {
                 "home_team_probability": (
@@ -639,7 +660,13 @@ def run_frozen_model_replay(
 
         status = "completed"
         if not dry_run and rollback_on_proof_failure and not proof_summary.get("proved_better", False):
-            _rollback_replayed_rows(db=db, league_id=league_id, run_id=run_id, replayed_keys=replayed_keys)
+            _rollback_replayed_rows(
+                db=db,
+                league_id=league_id,
+                run_id=run_id,
+                replayed_keys=replayed_keys,
+                model_version=str(frozen_model_version),
+            )
             status = "rolled_back"
 
         report_payload = {

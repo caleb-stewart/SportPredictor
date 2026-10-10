@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -104,15 +105,13 @@ def load_frozen_active_model(league_code: str | None = None) -> tuple[dict[str, 
 
 
 def load_model_bundle_by_version(model_version: str, league_code: str | None = None) -> dict[str, Any]:
-    root = _model_root_for_league(league_code)
-    metadata_path = root / model_version / "metadata.json"
-    if not metadata_path.exists():
-        raise ModelNotAvailableError(f"Model metadata not found for version={model_version}: {metadata_path}")
+    metadata_path = _find_model_metadata_path(model_version, league_code=league_code)
+    if metadata_path is None:
+        searched = ", ".join(str(root / model_version / "metadata.json") for root in _model_version_roots(league_code))
+        raise ModelNotAvailableError(f"Model metadata not found for version={model_version}; searched: {searched}")
 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    bundle_path = Path(metadata.get("bundle_path") or "")
-    if not bundle_path.is_absolute():
-        bundle_path = metadata_path.parent / bundle_path
+    bundle_path = _resolve_metadata_bundle_path(metadata_path, metadata)
     if not bundle_path.exists():
         raise ModelNotAvailableError(f"Model bundle not found for version={model_version}: {bundle_path}")
 
@@ -122,6 +121,93 @@ def load_model_bundle_by_version(model_version: str, league_code: str | None = N
         "model_family": metadata.get("model_family"),
     }
     return bundle
+
+
+def _model_version_roots(league_code: str | None = None) -> list[Path]:
+    """Return scoped and legacy artifact roots in lookup order."""
+
+    base_root = Path(settings.model_store_root).resolve()
+    scoped_root = _model_root_for_league(league_code)
+    roots = [scoped_root]
+    if normalize_league_code(league_code) == "whl":
+        roots.extend([base_root, base_root.parent / "whl_v3_baseline", base_root.parent / "whl_v4"])
+
+    unique: list[Path] = []
+    for root in roots:
+        if root not in unique:
+            unique.append(root)
+    return unique
+
+
+def _find_model_metadata_path(model_version: str, league_code: str | None = None) -> Path | None:
+    for root in _model_version_roots(league_code):
+        candidate = root / model_version / "metadata.json"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _resolve_metadata_bundle_path(metadata_path: Path, metadata: dict[str, Any]) -> Path:
+    raw_path = Path(str(metadata.get("bundle_path") or ""))
+    if raw_path.is_absolute() and raw_path.exists():
+        return raw_path
+    if raw_path.is_absolute():
+        # Metadata may contain the path from the machine that trained it. In a
+        # deployed model-store mount, the bundle is beside metadata.
+        return metadata_path.parent / raw_path.name
+    return metadata_path.parent / raw_path
+
+
+def _json_atomic_write(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def activate_model_version(model_version: str, league_code: str | None = None) -> dict[str, Any]:
+    """Atomically make a verified model version the active pointer."""
+
+    metadata_path = _find_model_metadata_path(model_version, league_code=league_code)
+    if metadata_path is None:
+        raise ModelNotAvailableError(f"Model metadata not found for version={model_version}")
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    bundle_path = _resolve_metadata_bundle_path(metadata_path, metadata)
+    if not bundle_path.exists():
+        raise ModelNotAvailableError(f"Model bundle not found for version={model_version}: {bundle_path}")
+    if not bool(metadata.get("gates_passed", True)):
+        raise ModelNotAvailableError(f"Model version={model_version} did not pass promotion gates")
+
+    model_root, pointer_path, _, _ = _read_active_pointer(league_code=league_code)
+    pointer_payload = dict(metadata)
+    try:
+        pointer_payload["bundle_path"] = str(bundle_path.relative_to(model_root))
+    except ValueError:
+        pointer_payload["bundle_path"] = str(bundle_path)
+
+    metrics_path = metadata.get("metrics_path")
+    if metrics_path:
+        resolved_metrics = Path(str(metrics_path))
+        if not resolved_metrics.exists() and resolved_metrics.is_absolute():
+            resolved_metrics = metadata_path.parent / resolved_metrics.name
+        if resolved_metrics.exists():
+            try:
+                pointer_payload["metrics_path"] = str(resolved_metrics.relative_to(model_root))
+            except ValueError:
+                pointer_payload["metrics_path"] = str(resolved_metrics)
+
+    _json_atomic_write(pointer_path, pointer_payload)
+    with _bundle_lock:
+        _cached_by_pointer.pop(str(pointer_path), None)
+
+    return {
+        "active": True,
+        "pointer_path": str(pointer_path),
+        "model_version": pointer_payload.get("model_version") or model_version,
+        "model_family": pointer_payload.get("model_family"),
+        "bundle_path": str(bundle_path),
+    }
 
 
 def _coerce_float(value: Any, field_name: str) -> float:

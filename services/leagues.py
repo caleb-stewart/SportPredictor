@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, aliased
 from db.models import ChlGame, ChlPredictionRecord, ChlTeam
 from services.data_backend import CHL_LEAGUES, DataBackendError, require_supported_league_code
 from services.league_time import league_today as _shared_league_today
+from services.predictor import get_model_status
 
 SUPPORTED_LEAGUES = [
     {
@@ -63,6 +64,21 @@ def _league_id_for_code(league_code: str) -> int:
     return int(cfg["id"])
 
 
+def _league_code_for_id(league_id: int) -> str:
+    for code, cfg in CHL_LEAGUES.items():
+        if int(cfg["id"]) == int(league_id):
+            return code
+    raise UnknownLeagueError(f"Unsupported league id: {league_id}")
+
+
+def _active_model_version(league_code: str) -> str | None:
+    """Return the model version the UI/API should expose for this league."""
+
+    status = get_model_status(league_code=league_code)
+    version = status.get("model_version") if status.get("active") else None
+    return str(version) if version else None
+
+
 def default_logo_url_for_provider(provider_team_id: int, league_code: str = "whl") -> str:
     normalized_league = _ensure_league(league_code)
     if normalized_league == "whl" and provider_team_id in FIFTY_BY_FIFTY_LOGO_PROVIDER_IDS:
@@ -93,6 +109,59 @@ def _serialize_team(
 
 def _to_float(value: Any) -> float | None:
     return float(value) if value is not None else None
+
+
+def _canonical_prediction_fields(
+    record: ChlPredictionRecord,
+    home_team: ChlTeam | None,
+    away_team: ChlTeam | None,
+) -> dict[str, Any]:
+    """Normalize the ensemble prediction, including legacy rows."""
+
+    raw_ensemble = (record.raw_model_outputs or {}).get("ensemble") or {}
+    home_probability = _to_float(
+        getattr(record, "ensemble_home_team_probability", None)
+        if getattr(record, "ensemble_home_team_probability", None) is not None
+        else raw_ensemble.get("home_team_prob", record.home_team_probability)
+    )
+    away_probability = _to_float(
+        getattr(record, "ensemble_away_team_probability", None)
+        if getattr(record, "ensemble_away_team_probability", None) is not None
+        else raw_ensemble.get("away_team_prob", record.away_team_probability)
+    )
+
+    predicted_id = getattr(record, "ensemble_predicted_winner_id", None)
+    if predicted_id is None and home_probability is not None and away_probability is not None:
+        predicted_id = home_team.id if home_team and home_probability >= away_probability else away_team.id if away_team else None
+    actual_id = getattr(record, "ensemble_actual_winner_id", None) or record.actual_winner_id
+    ensemble_correct = getattr(record, "ensemble_correct", None)
+    if ensemble_correct is None and actual_id is not None and predicted_id is not None:
+        ensemble_correct = int(predicted_id) == int(actual_id)
+
+    predicted_team = None
+    if predicted_id is not None:
+        if home_team is not None and int(predicted_id) == int(home_team.id):
+            predicted_team = home_team
+        elif away_team is not None and int(predicted_id) == int(away_team.id):
+            predicted_team = away_team
+    actual_team = None
+    if actual_id is not None:
+        if home_team is not None and int(actual_id) == int(home_team.id):
+            actual_team = home_team
+        elif away_team is not None and int(actual_id) == int(away_team.id):
+            actual_team = away_team
+
+    return {
+        "home_team_probability": home_probability,
+        "away_team_probability": away_probability,
+        "predicted_winner_db_team_id": int(predicted_id) if predicted_id is not None else None,
+        "predicted_winner_provider_team_id": int(predicted_team.hockeytech_id) if predicted_team else None,
+        "predicted_winner_name": predicted_team.name if predicted_team else None,
+        "actual_winner_db_team_id": int(actual_id) if actual_id is not None else None,
+        "actual_winner_provider_team_id": int(actual_team.hockeytech_id) if actual_team else None,
+        "actual_winner_name": actual_team.name if actual_team else None,
+        "correct": ensemble_correct,
+    }
 
 
 def _prediction_datetime_bounds(
@@ -243,9 +312,15 @@ def _query_consensus_prediction_rows(
             ChlPredictionRecord.game_id.label("game_id"),
             ChlPredictionRecord.home_team_id.label("home_team_id"),
             ChlPredictionRecord.away_team_id.label("away_team_id"),
-            ChlPredictionRecord.predicted_winner_id.label("predicted_winner_id"),
-            ChlPredictionRecord.actual_winner_id.label("actual_winner_id"),
-            ChlPredictionRecord.correct.label("correct"),
+            func.coalesce(
+                ChlPredictionRecord.ensemble_predicted_winner_id,
+                ChlPredictionRecord.predicted_winner_id,
+            ).label("predicted_winner_id"),
+            func.coalesce(
+                ChlPredictionRecord.ensemble_actual_winner_id,
+                ChlPredictionRecord.actual_winner_id,
+            ).label("actual_winner_id"),
+            func.coalesce(ChlPredictionRecord.ensemble_correct, ChlPredictionRecord.correct).label("correct"),
             row_rank.label("row_rank"),
         )
         .join(
@@ -258,6 +333,10 @@ def _query_consensus_prediction_rows(
         .where(ChlPredictionRecord.league_id == league_id)
         .where(ChlGame.game_date.is_not(None))
     )
+
+    active_version = _active_model_version(_league_code_for_id(league_id))
+    if active_version:
+        ranked_stmt = ranked_stmt.where(ChlPredictionRecord.model_version == active_version)
 
     if game_date_from is not None:
         ranked_stmt = ranked_stmt.where(ChlGame.game_date >= game_date_from)
@@ -469,6 +548,10 @@ def _query_prediction_rows(
         .where(ChlPredictionRecord.league_id == league_id)
     )
 
+    active_version = _active_model_version(league_code)
+    if active_version:
+        stmt = stmt.where(ChlPredictionRecord.model_version == active_version)
+
     prediction_start, prediction_end = _prediction_datetime_bounds(prediction_date_from, prediction_date_to)
     if prediction_start:
         stmt = stmt.where(ChlPredictionRecord.prediction_date >= prediction_start)
@@ -510,6 +593,7 @@ def _aggregate_predicted_games(
     aggregated: dict[int, dict[str, Any]] = {}
 
     for record, game, home_team, away_team, predicted_team, actual_team in rows:
+        canonical = _canonical_prediction_fields(record, home_team, away_team)
         key = int(record.game_id)
         item = aggregated.get(key)
         if item is None:
@@ -529,11 +613,19 @@ def _aggregate_predicted_games(
                 "home_team": _serialize_team(home_team, league_code=league_code),
                 "away_team": _serialize_team(away_team, league_code=league_code),
                 "predictions_by_k": [],
+                "predictions_count": 0,
                 "consensus_k_value": None,
                 "consensus_predicted_winner_db_team_id": None,
                 "consensus_predicted_winner_provider_team_id": None,
                 "consensus_predicted_winner_name": None,
+                "consensus_home_probability": None,
+                "consensus_away_probability": None,
                 "consensus_correct": None,
+                "resolved_games_count": 0,
+                "correct_games_count": 0,
+                "resolved_predictions_count": 0,
+                "correct_predictions_count": 0,
+                # Backward-compatible aliases (now game-level to avoid confusing summaries).
                 "resolved_count": 0,
                 "correct_count": 0,
             }
@@ -551,16 +643,26 @@ def _aggregate_predicted_games(
                 "actual_winner_provider_team_id": int(actual_team.hockeytech_id) if actual_team else None,
                 "actual_winner_name": actual_team.name if actual_team else None,
                 "correct": record.correct,
+                "ensemble_home_team_probability": canonical["home_team_probability"],
+                "ensemble_away_team_probability": canonical["away_team_probability"],
+                "ensemble_predicted_winner_db_team_id": canonical["predicted_winner_db_team_id"],
+                "ensemble_predicted_winner_provider_team_id": canonical["predicted_winner_provider_team_id"],
+                "ensemble_predicted_winner_name": canonical["predicted_winner_name"],
+                "ensemble_actual_winner_db_team_id": canonical["actual_winner_db_team_id"],
+                "ensemble_actual_winner_provider_team_id": canonical["actual_winner_provider_team_id"],
+                "ensemble_actual_winner_name": canonical["actual_winner_name"],
+                "ensemble_correct": canonical["correct"],
                 "model_version": record.model_version,
                 "model_family": record.model_family,
                 "raw_model_outputs": record.raw_model_outputs,
             }
         )
+        item["predictions_count"] += 1
 
         if record.correct is not None:
-            item["resolved_count"] += 1
+            item["resolved_predictions_count"] += 1
             if record.correct:
-                item["correct_count"] += 1
+                item["correct_predictions_count"] += 1
 
         if item["prediction_timestamp"] is None and record.prediction_date is not None:
             item["prediction_timestamp"] = record.prediction_date
@@ -573,12 +675,45 @@ def _aggregate_predicted_games(
         consensus = _choose_consensus_prediction(item["predictions_by_k"])
         if consensus:
             item["consensus_k_value"] = consensus["k_value"]
-            item["consensus_predicted_winner_db_team_id"] = consensus["predicted_winner_db_team_id"]
-            item["consensus_predicted_winner_provider_team_id"] = consensus["predicted_winner_provider_team_id"]
-            item["consensus_predicted_winner_name"] = consensus["predicted_winner_name"]
-            item["consensus_correct"] = consensus["correct"]
+            item["consensus_predicted_winner_db_team_id"] = consensus["ensemble_predicted_winner_db_team_id"]
+            item["consensus_predicted_winner_provider_team_id"] = consensus["ensemble_predicted_winner_provider_team_id"]
+            item["consensus_predicted_winner_name"] = consensus["ensemble_predicted_winner_name"]
+            item["consensus_home_probability"] = consensus["ensemble_home_team_probability"]
+            item["consensus_away_probability"] = consensus["ensemble_away_team_probability"]
+            item["consensus_correct"] = consensus["ensemble_correct"]
+
+        item["resolved_games_count"] = 1 if item["consensus_correct"] is not None else 0
+        item["correct_games_count"] = 1 if item["consensus_correct"] is True else 0
+        item["resolved_count"] = item["resolved_games_count"]
+        item["correct_count"] = item["correct_games_count"]
 
     return items
+
+
+def _apply_prediction_detail_options(
+    items: list[dict[str, Any]],
+    *,
+    include_k_breakdown: bool,
+    include_raw_model_outputs: bool,
+) -> list[dict[str, Any]]:
+    if include_k_breakdown and include_raw_model_outputs:
+        return items
+
+    shaped: list[dict[str, Any]] = []
+    for item in items:
+        row = dict(item)
+        if include_k_breakdown:
+            predictions = []
+            for prediction in row.get("predictions_by_k") or []:
+                next_prediction = dict(prediction)
+                if not include_raw_model_outputs:
+                    next_prediction["raw_model_outputs"] = None
+                predictions.append(next_prediction)
+            row["predictions_by_k"] = predictions
+        else:
+            row["predictions_by_k"] = []
+        shaped.append(row)
+    return shaped
 
 
 def _apply_result_filter(items: list[dict[str, Any]], result: str) -> list[dict[str, Any]]:
@@ -640,6 +775,8 @@ def list_predicted_games(
     limit: int,
     offset: int,
     sort: str,
+    include_k_breakdown: bool = False,
+    include_raw_model_outputs: bool = False,
 ) -> list[dict[str, Any]]:
     normalized_league = _ensure_league(league_code)
 
@@ -657,7 +794,12 @@ def list_predicted_games(
     items = _apply_result_filter(items, result=result)
     items = _sort_predicted_games(items, sort=sort)
 
-    return items[offset : offset + limit]
+    items = items[offset : offset + limit]
+    return _apply_prediction_detail_options(
+        items,
+        include_k_breakdown=include_k_breakdown,
+        include_raw_model_outputs=include_k_breakdown and include_raw_model_outputs,
+    )
 
 
 def get_next_predicted_slate(
@@ -666,6 +808,8 @@ def get_next_predicted_slate(
     *,
     as_of_date: dt.date | None,
     team_provider_id: int | None,
+    include_k_breakdown: bool = False,
+    include_raw_model_outputs: bool = False,
 ) -> dict[str, Any]:
     normalized_league = _ensure_league(league_code)
     effective_as_of = as_of_date or _league_today(normalized_league)
@@ -702,7 +846,11 @@ def get_next_predicted_slate(
         "target_game_date": target_game_date,
         "games_count": len(target_games),
         "predictions_count": predictions_count,
-        "games": target_games,
+        "games": _apply_prediction_detail_options(
+            target_games,
+            include_k_breakdown=include_k_breakdown,
+            include_raw_model_outputs=include_k_breakdown and include_raw_model_outputs,
+        ),
     }
 
 
@@ -716,6 +864,8 @@ def list_upcoming_predictions(
     team_provider_id: int | None,
     limit: int,
     offset: int,
+    include_k_breakdown: bool = False,
+    include_raw_model_outputs: bool = False,
 ) -> dict[str, Any]:
     normalized_league = _ensure_league(league_code)
     effective_as_of = as_of_date or _league_today(normalized_league)
@@ -732,6 +882,11 @@ def list_upcoming_predictions(
     )
     items = _aggregate_predicted_games(rows, league_code=normalized_league)
     filtered = _sort_for_upcoming([item for item in items if _is_upcoming(item, effective_as_of)])
+    filtered = _apply_prediction_detail_options(
+        filtered,
+        include_k_breakdown=include_k_breakdown,
+        include_raw_model_outputs=include_k_breakdown and include_raw_model_outputs,
+    )
     return _build_prediction_page(filtered, limit=limit, offset=offset)
 
 
@@ -746,6 +901,8 @@ def list_prediction_results(
     sort: str,
     limit: int,
     offset: int,
+    include_k_breakdown: bool = False,
+    include_raw_model_outputs: bool = False,
 ) -> dict[str, Any]:
     normalized_league = _ensure_league(league_code)
 
@@ -770,6 +927,11 @@ def list_prediction_results(
         resolved_items = [item for item in resolved_items if item.get("consensus_correct") is False]
 
     resolved_items = _sort_predicted_games(resolved_items, sort=sort)
+    resolved_items = _apply_prediction_detail_options(
+        resolved_items,
+        include_k_breakdown=include_k_breakdown,
+        include_raw_model_outputs=include_k_breakdown and include_raw_model_outputs,
+    )
     return _build_prediction_page(resolved_items, limit=limit, offset=offset)
 
 
@@ -810,9 +972,13 @@ def _consensus_results_base_stmt(
         )
         .where(ChlPredictionRecord.league_id == league_id)
         .where(ChlPredictionRecord.k_value == 15)
-        .where(ChlPredictionRecord.correct.is_not(None))
+        .where(func.coalesce(ChlPredictionRecord.ensemble_correct, ChlPredictionRecord.correct).is_not(None))
         .where(ChlGame.game_date.is_not(None))
     )
+
+    active_version = _active_model_version(_league_code_for_id(league_id))
+    if active_version:
+        stmt = stmt.where(ChlPredictionRecord.model_version == active_version)
 
     if game_date_from:
         stmt = stmt.where(ChlGame.game_date >= game_date_from)
@@ -828,9 +994,9 @@ def _consensus_results_base_stmt(
         )
 
     if result == "correct":
-        stmt = stmt.where(ChlPredictionRecord.correct.is_(True))
+        stmt = stmt.where(func.coalesce(ChlPredictionRecord.ensemble_correct, ChlPredictionRecord.correct).is_(True))
     elif result == "incorrect":
-        stmt = stmt.where(ChlPredictionRecord.correct.is_(False))
+        stmt = stmt.where(func.coalesce(ChlPredictionRecord.ensemble_correct, ChlPredictionRecord.correct).is_(False))
 
     return stmt
 
@@ -922,6 +1088,10 @@ def _query_prediction_rows_for_game_ids(
         .order_by(desc(ChlPredictionRecord.prediction_date), desc(ChlPredictionRecord.id))
     )
 
+    active_version = _active_model_version(_league_code_for_id(league_id))
+    if active_version:
+        stmt = stmt.where(ChlPredictionRecord.model_version == active_version)
+
     return db.execute(stmt).all()
 
 
@@ -935,6 +1105,8 @@ def list_prediction_results_by_day(
     result: str,
     page: int,
     days_per_page: int,
+    include_k_breakdown: bool = False,
+    include_raw_model_outputs: bool = False,
 ) -> dict[str, Any]:
     normalized_league = _ensure_league(league_code)
     league_id = _league_id_for_code(normalized_league)
@@ -1013,6 +1185,11 @@ def list_prediction_results_by_day(
         game_ids=game_ids,
     )
     games = _aggregate_predicted_games(rows, league_code=normalized_league)
+    games = _apply_prediction_detail_options(
+        games,
+        include_k_breakdown=include_k_breakdown,
+        include_raw_model_outputs=include_k_breakdown and include_raw_model_outputs,
+    )
 
     games_by_day: dict[dt.date, list[dict[str, Any]]] = defaultdict(list)
     for game in games:
@@ -1028,16 +1205,27 @@ def list_prediction_results_by_day(
             key=lambda row: (_scheduled_time_value(row), int(row["game_id"])),
         )
         resolved_games = [game for game in day_games if game.get("consensus_correct") is not None]
-        resolved_count = len(resolved_games)
-        correct_count = sum(1 for game in resolved_games if game.get("consensus_correct") is True)
-        accuracy_pct = round((correct_count / resolved_count) * 100.0, 2) if resolved_count > 0 else None
+        resolved_games_count = len(resolved_games)
+        correct_games_count = sum(1 for game in resolved_games if game.get("consensus_correct") is True)
+        resolved_predictions_count = sum(int(game.get("resolved_predictions_count") or 0) for game in day_games)
+        correct_predictions_count = sum(int(game.get("correct_predictions_count") or 0) for game in day_games)
+        accuracy_pct = (
+            round((correct_games_count / resolved_games_count) * 100.0, 2)
+            if resolved_games_count > 0
+            else None
+        )
 
         items.append(
             {
                 "game_date": game_date,
                 "games_count": len(day_games),
-                "resolved_count": resolved_count,
-                "correct_count": correct_count,
+                "resolved_games_count": resolved_games_count,
+                "correct_games_count": correct_games_count,
+                "resolved_predictions_count": resolved_predictions_count,
+                "correct_predictions_count": correct_predictions_count,
+                # Backward-compatible aliases.
+                "resolved_count": resolved_games_count,
+                "correct_count": correct_games_count,
                 "accuracy_pct": accuracy_pct,
                 "games": day_games,
             }
@@ -1062,6 +1250,8 @@ def list_recent_result_days(
     days: int,
     team_provider_id: int | None,
     as_of_date: dt.date | None,
+    include_k_breakdown: bool = False,
+    include_raw_model_outputs: bool = False,
 ) -> dict[str, Any]:
     normalized_league = _ensure_league(league_code)
     effective_as_of = as_of_date or _league_today(normalized_league)
@@ -1076,6 +1266,11 @@ def list_recent_result_days(
         team_provider_id=team_provider_id,
     )
     items = _aggregate_predicted_games(rows, league_code=normalized_league)
+    items = _apply_prediction_detail_options(
+        items,
+        include_k_breakdown=include_k_breakdown,
+        include_raw_model_outputs=include_k_breakdown and include_raw_model_outputs,
+    )
 
     grouped: dict[dt.date, list[dict[str, Any]]] = defaultdict(list)
     for item in items:
@@ -1090,15 +1285,26 @@ def list_recent_result_days(
     for game_date in sorted(grouped.keys(), reverse=True)[:days]:
         games = sorted(grouped[game_date], key=lambda row: (_scheduled_time_value(row), int(row["game_id"])))
         resolved_games = [game for game in games if game.get("consensus_correct") is not None]
-        resolved_count = len(resolved_games)
-        correct_count = sum(1 for game in resolved_games if game.get("consensus_correct") is True)
-        accuracy_pct = round((correct_count / resolved_count) * 100.0, 2) if resolved_count > 0 else None
+        resolved_games_count = len(resolved_games)
+        correct_games_count = sum(1 for game in resolved_games if game.get("consensus_correct") is True)
+        resolved_predictions_count = sum(int(game.get("resolved_predictions_count") or 0) for game in games)
+        correct_predictions_count = sum(int(game.get("correct_predictions_count") or 0) for game in games)
+        accuracy_pct = (
+            round((correct_games_count / resolved_games_count) * 100.0, 2)
+            if resolved_games_count > 0
+            else None
+        )
         day_rows.append(
             {
                 "game_date": game_date,
                 "games_count": len(games),
-                "resolved_count": resolved_count,
-                "correct_count": correct_count,
+                "resolved_games_count": resolved_games_count,
+                "correct_games_count": correct_games_count,
+                "resolved_predictions_count": resolved_predictions_count,
+                "correct_predictions_count": correct_predictions_count,
+                # Backward-compatible aliases.
+                "resolved_count": resolved_games_count,
+                "correct_count": correct_games_count,
                 "accuracy_pct": accuracy_pct,
                 "games": games,
             }
@@ -1112,20 +1318,27 @@ def list_recent_result_days(
 
 
 def _build_daily_summary(prediction_date: dt.date, games: list[dict[str, Any]]) -> dict[str, Any]:
-    predictions_count = sum(len(game["predictions_by_k"]) for game in games)
-    resolved_count = sum(game["resolved_count"] for game in games)
-    correct_count = sum(game["correct_count"] for game in games)
+    predictions_count = sum(int(game.get("predictions_count") or 0) for game in games)
+    resolved_games_count = sum(int(game.get("resolved_games_count") or 0) for game in games)
+    correct_games_count = sum(int(game.get("correct_games_count") or 0) for game in games)
+    resolved_predictions_count = sum(int(game.get("resolved_predictions_count") or 0) for game in games)
+    correct_predictions_count = sum(int(game.get("correct_predictions_count") or 0) for game in games)
 
     accuracy_pct = None
-    if resolved_count > 0:
-        accuracy_pct = round((correct_count / resolved_count) * 100.0, 2)
+    if resolved_games_count > 0:
+        accuracy_pct = round((correct_games_count / resolved_games_count) * 100.0, 2)
 
     return {
         "prediction_date": prediction_date,
         "games_count": len(games),
         "predictions_count": predictions_count,
-        "resolved_count": resolved_count,
-        "correct_count": correct_count,
+        "resolved_games_count": resolved_games_count,
+        "correct_games_count": correct_games_count,
+        "resolved_predictions_count": resolved_predictions_count,
+        "correct_predictions_count": correct_predictions_count,
+        # Backward-compatible aliases.
+        "resolved_count": resolved_games_count,
+        "correct_count": correct_games_count,
         "accuracy_pct": accuracy_pct,
     }
 
@@ -1175,6 +1388,8 @@ def get_daily_report_detail(
     prediction_date: dt.date,
     *,
     team_provider_id: int | None,
+    include_k_breakdown: bool = False,
+    include_raw_model_outputs: bool = False,
 ) -> dict[str, Any]:
     normalized_league = _ensure_league(league_code)
 
@@ -1190,6 +1405,8 @@ def get_daily_report_detail(
         limit=10_000,
         offset=0,
         sort="game_date_desc",
+        include_k_breakdown=include_k_breakdown,
+        include_raw_model_outputs=include_k_breakdown and include_raw_model_outputs,
     )
 
     if not games:
@@ -1222,20 +1439,32 @@ def get_game_detail(db: Session, league_code: str, game_id: int) -> dict[str, An
     normalized_league = _ensure_league(league_code)
     league_id = _league_id_for_code(normalized_league)
 
-    game = db.scalar(select(ChlGame).where(ChlGame.league_id == league_id, ChlGame.game_id == game_id))
-    if game is None:
+    home_team_alias = aliased(ChlTeam)
+    away_team_alias = aliased(ChlTeam)
+    game_row = db.execute(
+        select(ChlGame, home_team_alias, away_team_alias)
+        .join(
+            home_team_alias,
+            and_(
+                home_team_alias.league_id == ChlGame.league_id,
+                home_team_alias.hockeytech_id == ChlGame.home_team_id,
+            ),
+            isouter=True,
+        )
+        .join(
+            away_team_alias,
+            and_(
+                away_team_alias.league_id == ChlGame.league_id,
+                away_team_alias.hockeytech_id == ChlGame.away_team_id,
+            ),
+            isouter=True,
+        )
+        .where(ChlGame.league_id == league_id, ChlGame.game_id == game_id)
+    ).one_or_none()
+    if game_row is None:
         raise GameNotFoundError(f"Game not found: {game_id}")
 
-    home_team = None
-    away_team = None
-    if game.home_team_id is not None:
-        home_team = db.scalar(
-            select(ChlTeam).where(ChlTeam.league_id == league_id, ChlTeam.hockeytech_id == game.home_team_id)
-        )
-    if game.away_team_id is not None:
-        away_team = db.scalar(
-            select(ChlTeam).where(ChlTeam.league_id == league_id, ChlTeam.hockeytech_id == game.away_team_id)
-        )
+    game, home_team, away_team = game_row
 
     predicted_team = aliased(ChlTeam)
     actual_team = aliased(ChlTeam)
@@ -1248,8 +1477,23 @@ def get_game_detail(db: Session, league_code: str, game_id: int) -> dict[str, An
         .order_by(asc(ChlPredictionRecord.k_value))
     ).all()
 
+    active_version = _active_model_version(normalized_league)
+    if active_version:
+        prediction_rows = db.execute(
+            select(ChlPredictionRecord, predicted_team, actual_team)
+            .join(predicted_team, predicted_team.id == ChlPredictionRecord.predicted_winner_id, isouter=True)
+            .join(actual_team, actual_team.id == ChlPredictionRecord.actual_winner_id, isouter=True)
+            .where(
+                ChlPredictionRecord.league_id == league_id,
+                ChlPredictionRecord.game_id == game_id,
+                ChlPredictionRecord.model_version == active_version,
+            )
+            .order_by(asc(ChlPredictionRecord.k_value))
+        ).all()
+
     predictions_by_k: list[dict[str, Any]] = []
     for record, predicted, actual in prediction_rows:
+        canonical = _canonical_prediction_fields(record, home_team, away_team)
         predictions_by_k.append(
             {
                 "k_value": int(record.k_value),
@@ -1262,6 +1506,15 @@ def get_game_detail(db: Session, league_code: str, game_id: int) -> dict[str, An
                 "actual_winner_provider_team_id": int(actual.hockeytech_id) if actual else None,
                 "actual_winner_name": actual.name if actual else None,
                 "correct": record.correct,
+                "ensemble_home_team_probability": canonical["home_team_probability"],
+                "ensemble_away_team_probability": canonical["away_team_probability"],
+                "ensemble_predicted_winner_db_team_id": canonical["predicted_winner_db_team_id"],
+                "ensemble_predicted_winner_provider_team_id": canonical["predicted_winner_provider_team_id"],
+                "ensemble_predicted_winner_name": canonical["predicted_winner_name"],
+                "ensemble_actual_winner_db_team_id": canonical["actual_winner_db_team_id"],
+                "ensemble_actual_winner_provider_team_id": canonical["actual_winner_provider_team_id"],
+                "ensemble_actual_winner_name": canonical["actual_winner_name"],
+                "ensemble_correct": canonical["correct"],
                 "model_version": record.model_version,
                 "model_family": record.model_family,
                 "raw_model_outputs": record.raw_model_outputs,
@@ -1269,6 +1522,10 @@ def get_game_detail(db: Session, league_code: str, game_id: int) -> dict[str, An
         )
 
     consensus = _choose_consensus_prediction(predictions_by_k)
+    resolved_predictions_count = sum(1 for row in predictions_by_k if row.get("correct") is not None)
+    correct_predictions_count = sum(1 for row in predictions_by_k if row.get("correct") is True)
+    resolved_games_count = 1 if consensus and consensus.get("ensemble_correct") is not None else 0
+    correct_games_count = 1 if consensus and consensus.get("ensemble_correct") is True else 0
 
     return {
         "league_code": normalized_league,
@@ -1301,8 +1558,16 @@ def get_game_detail(db: Session, league_code: str, game_id: int) -> dict[str, An
         "links": _scorebar_links(game.scorebar_snapshot),
         "predictions_by_k": predictions_by_k,
         "consensus_k_value": consensus["k_value"] if consensus else None,
-        "consensus_predicted_winner_db_team_id": consensus["predicted_winner_db_team_id"] if consensus else None,
-        "consensus_predicted_winner_provider_team_id": consensus["predicted_winner_provider_team_id"] if consensus else None,
-        "consensus_predicted_winner_name": consensus["predicted_winner_name"] if consensus else None,
-        "consensus_correct": consensus["correct"] if consensus else None,
+        "consensus_predicted_winner_db_team_id": consensus["ensemble_predicted_winner_db_team_id"] if consensus else None,
+        "consensus_predicted_winner_provider_team_id": consensus["ensemble_predicted_winner_provider_team_id"] if consensus else None,
+        "consensus_predicted_winner_name": consensus["ensemble_predicted_winner_name"] if consensus else None,
+        "consensus_home_probability": consensus["ensemble_home_team_probability"] if consensus else None,
+        "consensus_away_probability": consensus["ensemble_away_team_probability"] if consensus else None,
+        "consensus_correct": consensus["ensemble_correct"] if consensus else None,
+        "resolved_games_count": resolved_games_count,
+        "correct_games_count": correct_games_count,
+        "resolved_predictions_count": resolved_predictions_count,
+        "correct_predictions_count": correct_predictions_count,
+        "resolved_count": resolved_games_count,
+        "correct_count": correct_games_count,
     }

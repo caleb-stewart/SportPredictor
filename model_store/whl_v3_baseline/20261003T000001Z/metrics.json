@@ -1,0 +1,203 @@
+{
+  "base_models_holdout": {
+    "10": {
+      "accuracy": 0.6325177223873771,
+      "auc": 0.683987095335929,
+      "brier": 0.22187088323569298,
+      "log_loss": 0.633577498848857
+    },
+    "15": {
+      "accuracy": 0.6359478618797164,
+      "auc": 0.68689913132915,
+      "brier": 0.22124941721180963,
+      "log_loss": 0.6322459296144075
+    },
+    "5": {
+      "accuracy": 0.6327463983535331,
+      "auc": 0.6723936285648902,
+      "brier": 0.22487640776181028,
+      "log_loss": 0.6403139310637148
+    }
+  },
+  "baseline_home_rate_holdout": {
+    "accuracy": 0.547907614909673,
+    "auc": 0.5,
+    "brier": 0.24776056753377063,
+    "log_loss": 0.6886625280762979
+  },
+  "catboost_challenger_holdout": {
+    "10": {
+      "accuracy": 0.6242853876057627,
+      "auc": 0.6635325441238685,
+      "brier": 0.2284426874804286,
+      "log_loss": 0.6488454844361626
+    },
+    "15": {
+      "accuracy": 0.6295449348273496,
+      "auc": 0.6748872467432232,
+      "brier": 0.22594247421804708,
+      "log_loss": 0.6442151640993453
+    },
+    "5": {
+      "accuracy": 0.6137662931625886,
+      "auc": 0.6525572041752271,
+      "brier": 0.23032098015256494,
+      "log_loss": 0.6524852022622671
+    }
+  },
+  "challenger_holdout": {
+    "10": {
+      "accuracy": 0.6265721472673222,
+      "auc": 0.6733803515047418,
+      "brier": 0.22450448446034357,
+      "log_loss": 0.6394452315928744
+    },
+    "15": {
+      "accuracy": 0.6258861193688543,
+      "auc": 0.6806440805490183,
+      "brier": 0.22275099218776664,
+      "log_loss": 0.6352943272169308
+    },
+    "5": {
+      "accuracy": 0.6252000914703865,
+      "auc": 0.663737108635789,
+      "brier": 0.2267681483019446,
+      "log_loss": 0.6446383649991951
+    }
+  },
+  "chosen_model": {
+    "accuracy": 0.6471529842213584,
+    "auc": 0.6943506417287961,
+    "brier": 0.21952200263829616,
+    "log_loss": 0.6286387848076462,
+    "name": "raw_logistic",
+    "selection_metric": "time_cv_log_loss_then_accuracy",
+    "time_cv": {
+      "accuracy": 0.6390284067517497,
+      "auc": 0.6819189563382835,
+      "brier": 0.2224700639722226,
+      "log_loss": 0.6351293247485821
+    }
+  },
+  "dataset": {
+    "date_max": "2026-02-20",
+    "date_min": "1999-09-26",
+    "games_full_k_coverage": 21864,
+    "rows_full_k_coverage": 65592,
+    "rows_raw": 65853
+  },
+  "gates": {
+    "accuracy_gate": {
+      "passed": true,
+      "threshold": 0.6,
+      "value": 0.6471529842213584
+    },
+    "all_passed": true,
+    "baseline_brier_gate": {
+      "baseline": 0.24776056753377063,
+      "passed": true,
+      "value": 0.21952200263829616
+    },
+    "baseline_log_loss_gate": {
+      "baseline": 0.6886625280762979,
+      "passed": true,
+      "value": 0.6286387848076462
+    },
+    "season_floor_gate": {
+      "minimum_games_per_season": 100,
+      "passed": true,
+      "threshold": 0.55,
+      "value": 0.6324237560192616
+    }
+  },
+  "goals_branch_holdout": {
+    "accuracy": 0.6373199176766522,
+    "auc": 0.686798221280958,
+    "brier": 0.22222340699458734,
+    "log_loss": 0.6347062273055614
+  },
+  "rating_branch_holdout": {
+    "accuracy": 0.6377772696089641,
+    "auc": 0.6716997136519052,
+    "brier": 0.22606561935734065,
+    "log_loss": 0.6434311175766005
+  },
+  "season_stability_holdout": [
+    {
+      "accuracy": 0.6724598930481284,
+      "games": 748.0,
+      "season_id": 275
+    },
+    {
+      "accuracy": 0.6470588235294118,
+      "games": 748.0,
+      "season_id": 279
+    },
+    {
+      "accuracy": 0.6483957219251337,
+      "games": 748.0,
+      "season_id": 281
+    },
+    {
+      "accuracy": 0.6350267379679144,
+      "games": 748.0,
+      "season_id": 285
+    },
+    {
+      "accuracy": 0.6324237560192616,
+      "games": 623.0,
+      "season_id": 289
+    },
+    {
+      "accuracy": 0.6778846153846154,
+      "games": 208.0,
+      "season_id": 273
+    }
+  ],
+  "splits": {
+    "holdout_games": 4373,
+    "holdout_home_win_rate": 0.547907614909673,
+    "train_games": 17491,
+    "train_home_win_rate": 0.5553713338288263
+  },
+  "stacker_candidates_holdout": {
+    "isotonic_calibrated": {
+      "accuracy": 0.643722844729019,
+      "auc": 0.6940336617343186,
+      "brier": 0.21980390872502517,
+      "log_loss": 0.6399660287504167
+    },
+    "platt_calibrated": {
+      "accuracy": 0.6421221129659272,
+      "auc": 0.6940580448108169,
+      "brier": 0.21944078274700898,
+      "log_loss": 0.6284149097486538
+    },
+    "raw_logistic": {
+      "accuracy": 0.6471529842213584,
+      "auc": 0.6943506417287961,
+      "brier": 0.21952200263829616,
+      "log_loss": 0.6286387848076462
+    }
+  },
+  "stacker_candidates_time_cv": {
+    "isotonic_calibrated": {
+      "accuracy": 0.6388637299300124,
+      "auc": 0.6800854609286149,
+      "brier": 0.22346628786930062,
+      "log_loss": 0.6415374339276501
+    },
+    "platt_calibrated": {
+      "accuracy": 0.6382873610539317,
+      "auc": 0.6807970859224342,
+      "brier": 0.22294208380925098,
+      "log_loss": 0.6361945722791325
+    },
+    "raw_logistic": {
+      "accuracy": 0.6390284067517497,
+      "auc": 0.6819189563382835,
+      "brier": 0.2224700639722226,
+      "log_loss": 0.6351293247485821
+    }
+  }
+}
