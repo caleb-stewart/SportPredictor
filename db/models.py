@@ -150,6 +150,13 @@ class ChlPredictionRecord(Base):
     away_team_probability: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
     actual_winner_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("chl_teams.id"))
     correct: Mapped[Optional[bool]] = mapped_column(Boolean)
+    # The k-specific rows are retained for diagnostics, while these fields
+    # carry the canonical model prediction shown by the application.
+    ensemble_predicted_winner_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("chl_teams.id"))
+    ensemble_home_team_probability: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    ensemble_away_team_probability: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    ensemble_actual_winner_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("chl_teams.id"))
+    ensemble_correct: Mapped[Optional[bool]] = mapped_column(Boolean)
     prediction_date: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True))
     model_version: Mapped[Optional[str]] = mapped_column(String)
     model_family: Mapped[Optional[str]] = mapped_column(String)
@@ -162,7 +169,8 @@ class ChlPredictionRecord(Base):
             "league_id",
             "game_id",
             "k_value",
-            name="uq_chl_prediction_records_league_game_k",
+            "model_version",
+            name="uq_chl_prediction_records_league_game_k_model",
         ),
     )
 
@@ -203,6 +211,11 @@ class ChlPredictionRecordArchive(Base):
     away_team_probability: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
     actual_winner_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     correct: Mapped[Optional[bool]] = mapped_column(Boolean)
+    ensemble_predicted_winner_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    ensemble_home_team_probability: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    ensemble_away_team_probability: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    ensemble_actual_winner_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    ensemble_correct: Mapped[Optional[bool]] = mapped_column(Boolean)
     prediction_date: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True))
     model_version: Mapped[Optional[str]] = mapped_column(String)
     model_family: Mapped[Optional[str]] = mapped_column(String)

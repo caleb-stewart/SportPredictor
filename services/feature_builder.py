@@ -194,16 +194,16 @@ def build_features_by_k(
             game_model.home_goal_count.is_not(None),
             game_model.away_goal_count.is_not(None),
             game_model.game_date < game_date,
-            or_(
-                game_model.home_team_id.in_([home_team_hockeytech_id, away_team_hockeytech_id]),
-                game_model.away_team_id.in_([home_team_hockeytech_id, away_team_hockeytech_id]),
-            ),
         )
         .order_by(game_model.game_date.asc(), game_model.game_id.asc())
     )
     history_stmt = apply_league_scope(history_stmt, game_model, league_id)
     history_rows = db.execute(history_stmt).all()
 
+    # V3 was trained with league-wide Elo state. Replaying all prior league
+    # games here keeps live/upcoming predictions on the same feature contract
+    # as historical materialization; restricting this to the two teams would
+    # leave the matchup with a different opponent-adjusted context.
     context_features = compute_matchup_context_features(
         historical_games=[
             {

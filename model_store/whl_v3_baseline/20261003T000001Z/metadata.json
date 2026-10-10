@@ -1,0 +1,8 @@
+{
+  "bundle_path": "/home/caleb/Projects/SportPredictor/model_store/whl_v3_baseline/20261003T000001Z/model_bundle.joblib",
+  "gates_passed": true,
+  "metrics_path": "/home/caleb/Projects/SportPredictor/model_store/whl_v3_baseline/20261003T000001Z/metrics.json",
+  "model_family": "whl_v3_hybrid_branch_stacker",
+  "model_version": "20261003T000001Z",
+  "trained_at_utc": "2026-10-03T20:29:33Z"
+}

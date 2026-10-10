@@ -4,9 +4,9 @@ import datetime as dt
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import and_, desc, or_, select
+from sqlalchemy import and_, case, desc, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from services.data_backend import (
     DataBackendError,
@@ -28,7 +28,7 @@ from services.feature_builder import (
     build_features_by_k,
 )
 from services.hockeytech_client import HockeyTechClient
-from services.predictor import predict_from_payload
+from services.predictor import get_model_status, predict_from_payload
 
 K_VALUES = [5, 10, 15]
 FINAL_STATUS_TOKENS = {"4", "final", "completed", "game over", "end"}
@@ -455,39 +455,174 @@ def _update_prediction_record_correctness(
         team_model = store.team_model
         prediction_model = store.prediction_model
 
-        games_stmt = apply_league_scope(select(game_model).where(game_model.game_date == target_date), game_model, league_id)
+        bind = getattr(db, "bind", None)
+        dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
+        if dialect_name == "postgresql":
+            home_team_alias = aliased(team_model)
+            away_team_alias = aliased(team_model)
+
+            actual_winner_expr = case(
+                (game_model.home_goal_count > game_model.away_goal_count, home_team_alias.id),
+                (game_model.home_goal_count < game_model.away_goal_count, away_team_alias.id),
+                else_=None,
+            )
+
+            games_subquery = (
+                select(
+                    game_model.game_id.label("game_id"),
+                    actual_winner_expr.label("actual_winner_id"),
+                )
+                .join(
+                    home_team_alias,
+                    and_(
+                        home_team_alias.hockeytech_id == game_model.home_team_id,
+                        home_team_alias.league_id == league_id,
+                    ),
+                )
+                .join(
+                    away_team_alias,
+                    and_(
+                        away_team_alias.hockeytech_id == game_model.away_team_id,
+                        away_team_alias.league_id == league_id,
+                    ),
+                )
+                .where(
+                    game_model.league_id == league_id,
+                    game_model.game_date == target_date,
+                    game_model.home_goal_count.is_not(None),
+                    game_model.away_goal_count.is_not(None),
+                )
+                .subquery()
+            )
+
+            predicted_winner_expr = case(
+                (
+                    func.coalesce(prediction_model.home_team_probability, 0.0)
+                    >= func.coalesce(prediction_model.away_team_probability, 0.0),
+                    prediction_model.home_team_id,
+                ),
+                else_=prediction_model.away_team_id,
+            )
+            ensemble_predicted_winner_expr = case(
+                (
+                    prediction_model.ensemble_predicted_winner_id.is_not(None),
+                    prediction_model.ensemble_predicted_winner_id,
+                ),
+                else_=predicted_winner_expr,
+            )
+            correct_expr = case(
+                (games_subquery.c.actual_winner_id.is_(None), None),
+                (predicted_winner_expr == games_subquery.c.actual_winner_id, True),
+                else_=False,
+            )
+            ensemble_correct_expr = case(
+                (games_subquery.c.actual_winner_id.is_(None), None),
+                (ensemble_predicted_winner_expr == games_subquery.c.actual_winner_id, True),
+                else_=False,
+            )
+
+            stmt = (
+                update(prediction_model)
+                .where(
+                    prediction_model.league_id == league_id,
+                    prediction_model.game_id == games_subquery.c.game_id,
+                )
+                .values(
+                    predicted_winner_id=predicted_winner_expr,
+                    actual_winner_id=games_subquery.c.actual_winner_id,
+                    correct=correct_expr,
+                    ensemble_predicted_winner_id=ensemble_predicted_winner_expr,
+                    ensemble_actual_winner_id=games_subquery.c.actual_winner_id,
+                    ensemble_correct=ensemble_correct_expr,
+                )
+            )
+            db.execute(stmt)
+            continue
+
+        # Non-PostgreSQL fallback for local sqlite-style test environments.
+        games_stmt = apply_league_scope(
+            select(game_model)
+            .where(game_model.game_date == target_date)
+            .where(game_model.home_goal_count.is_not(None))
+            .where(game_model.away_goal_count.is_not(None)),
+            game_model,
+            league_id,
+        )
         games = db.scalars(games_stmt).all()
+        if not games:
+            continue
 
+        provider_team_ids: set[int] = set()
+        game_winner_by_game_id: dict[int, int | None] = {}
         for game in games:
-            if game.home_goal_count is None or game.away_goal_count is None:
-                continue
+            if game.home_team_id is not None:
+                provider_team_ids.add(int(game.home_team_id))
+            if game.away_team_id is not None:
+                provider_team_ids.add(int(game.away_team_id))
 
-            home_team_stmt = select(team_model).where(team_model.hockeytech_id == game.home_team_id)
-            away_team_stmt = select(team_model).where(team_model.hockeytech_id == game.away_team_id)
-            home_team = db.scalar(apply_league_scope(home_team_stmt, team_model, league_id))
-            away_team = db.scalar(apply_league_scope(away_team_stmt, team_model, league_id))
-            if not home_team or not away_team:
+        team_stmt = apply_league_scope(
+            select(team_model).where(team_model.hockeytech_id.in_(provider_team_ids)),
+            team_model,
+            league_id,
+        )
+        teams_by_provider_id = {int(team.hockeytech_id): int(team.id) for team in db.scalars(team_stmt).all()}
+
+        game_ids: list[int] = []
+        for game in games:
+            home_db_id = teams_by_provider_id.get(int(game.home_team_id)) if game.home_team_id is not None else None
+            away_db_id = teams_by_provider_id.get(int(game.away_team_id)) if game.away_team_id is not None else None
+            if home_db_id is None or away_db_id is None:
                 continue
 
             actual_winner_id: int | None
             if game.home_goal_count > game.away_goal_count:
-                actual_winner_id = home_team.id
+                actual_winner_id = home_db_id
             elif game.home_goal_count < game.away_goal_count:
-                actual_winner_id = away_team.id
+                actual_winner_id = away_db_id
             else:
                 actual_winner_id = None
+            game_ids.append(int(game.game_id))
+            game_winner_by_game_id[int(game.game_id)] = actual_winner_id
 
-            records_stmt = apply_league_scope(
-                select(prediction_model).where(prediction_model.game_id == game.game_id),
-                prediction_model,
-                league_id,
+        if not game_ids:
+            continue
+
+        records_stmt = apply_league_scope(
+            select(prediction_model).where(prediction_model.game_id.in_(game_ids)),
+            prediction_model,
+            league_id,
+        )
+        for record in db.scalars(records_stmt).all():
+            predicted_winner_id = (
+                record.home_team_id
+                if (record.home_team_probability or 0) >= (record.away_team_probability or 0)
+                else record.away_team_id
             )
-            records = db.scalars(records_stmt).all()
-            for record in records:
-                predicted_winner_id = record.home_team_id if (record.home_team_probability or 0) >= (record.away_team_probability or 0) else record.away_team_id
-                record.predicted_winner_id = predicted_winner_id
-                record.actual_winner_id = actual_winner_id
-                record.correct = (predicted_winner_id == actual_winner_id) if actual_winner_id is not None else None
+            actual_winner_id = game_winner_by_game_id.get(int(record.game_id))
+            record.predicted_winner_id = predicted_winner_id
+            record.actual_winner_id = actual_winner_id
+            record.correct = (predicted_winner_id == actual_winner_id) if actual_winner_id is not None else None
+            raw_ensemble = (record.raw_model_outputs or {}).get("ensemble") or {}
+            ensemble_home = getattr(record, "ensemble_home_team_probability", None)
+            ensemble_away = getattr(record, "ensemble_away_team_probability", None)
+            if ensemble_home is None:
+                ensemble_home = raw_ensemble.get("home_team_prob")
+            if ensemble_away is None:
+                ensemble_away = raw_ensemble.get("away_team_prob")
+            ensemble_predicted_winner_id = getattr(record, "ensemble_predicted_winner_id", None)
+            if ensemble_predicted_winner_id is None and ensemble_home is not None and ensemble_away is not None:
+                ensemble_predicted_winner_id = (
+                    record.home_team_id if float(ensemble_home) >= float(ensemble_away) else record.away_team_id
+                )
+            record.ensemble_predicted_winner_id = ensemble_predicted_winner_id
+            record.ensemble_home_team_probability = ensemble_home
+            record.ensemble_away_team_probability = ensemble_away
+            record.ensemble_actual_winner_id = actual_winner_id
+            record.ensemble_correct = (
+                ensemble_predicted_winner_id == actual_winner_id
+                if actual_winner_id is not None and ensemble_predicted_winner_id is not None
+                else None
+            )
 
     db.commit()
 
@@ -671,9 +806,11 @@ def _persist_prediction_rows(
 
         predicted_winner_db_id = None
         if predicted_ht_id == home_team_write.hockeytech_id:
-            predicted_winner_db_id = home_team_write.id
+            ensemble_predicted_winner_db_id = home_team_write.id
         elif predicted_ht_id == away_team_write.hockeytech_id:
-            predicted_winner_db_id = away_team_write.id
+            ensemble_predicted_winner_db_id = away_team_write.id
+        else:
+            ensemble_predicted_winner_db_id = None
 
         actual_winner_db_id = None
         if game_write.home_goal_count is not None and game_write.away_goal_count is not None:
@@ -682,14 +819,21 @@ def _persist_prediction_rows(
             elif game_write.home_goal_count < game_write.away_goal_count:
                 actual_winner_db_id = away_team_write.id
 
+        ensemble_correct = (
+            ensemble_predicted_winner_db_id == actual_winner_db_id
+            if actual_winner_db_id is not None
+            else None
+        )
+
         for k in K_VALUES:
             comp = (result.get("k_components") or {}).get(str(k), {})
             home_prob = float(comp.get("home_team_prob", ensemble_home))
             away_prob = float(comp.get("away_team_prob", ensemble_away))
 
-            winner_id = predicted_winner_db_id
-            if winner_id is None:
-                winner_id = home_team_write.id if home_prob >= away_prob else away_team_write.id
+            # Keep the rolling branch winner on each k row. The final model
+            # decision is stored separately so the UI/scoring path can use the
+            # ensemble without losing branch diagnostics.
+            winner_id = home_team_write.id if home_prob >= away_prob else away_team_write.id
 
             raw_outputs = {
                 "ensemble": {
@@ -712,6 +856,11 @@ def _persist_prediction_rows(
                 "predicted_winner_id": winner_id,
                 "actual_winner_id": actual_winner_db_id,
                 "correct": (winner_id == actual_winner_db_id) if actual_winner_db_id is not None else None,
+                "ensemble_predicted_winner_id": ensemble_predicted_winner_db_id,
+                "ensemble_home_team_probability": ensemble_home,
+                "ensemble_away_team_probability": ensemble_away,
+                "ensemble_actual_winner_id": actual_winner_db_id,
+                "ensemble_correct": ensemble_correct,
                 "prediction_date": now,
                 "model_version": result.get("model_version"),
                 "model_family": result.get("model_family"),
@@ -897,6 +1046,11 @@ def list_prediction_history(
 
     stmt = select(prediction_model).order_by(desc(prediction_model.prediction_date), desc(prediction_model.id))
     stmt = apply_league_scope(stmt, prediction_model, league_id)
+
+    active_status = get_model_status(league_code=normalized)
+    active_version = active_status.get("model_version") if active_status.get("active") else None
+    if active_version:
+        stmt = stmt.where(prediction_model.model_version == active_version)
 
     start_dt, end_dt = prediction_date_bounds(date_from=date_from, date_to=date_to)
     if start_dt:

@@ -171,7 +171,10 @@ def rolling_conflict_columns(store: HockeyStoreModels) -> list[str]:
 
 
 def prediction_conflict_columns(store: HockeyStoreModels) -> list[str]:
-    return ["league_id", "game_id", "k_value"] if store.league_scoped else ["game_id", "k_value"]
+    # Prediction history is append-only across model versions.  Re-running a
+    # materialization for the same version remains idempotent, while a new
+    # version creates a parallel set of rows for the same game/k pair.
+    return ["league_id", "game_id", "k_value", "model_version"] if store.league_scoped else ["game_id", "k_value", "model_version"]
 
 
 def ensure_chl_league(db: Session, league_code: str | None) -> ChlLeague:
