@@ -19,6 +19,7 @@ from schemas.predictions import (
 )
 from services.feature_builder import InsufficientHistoryError, TeamNotFoundError
 from services.hockeytech_client import HockeyTechClientError
+from services.nhl_client import NhlClientError
 from services.predictor import ModelNotAvailableError, PayloadContractError
 from services.prediction_pipeline import (
     list_prediction_history,
@@ -38,13 +39,14 @@ from services.data_backend import (
     require_supported_league_code,
     resolve_league_id_for_store,
 )
+from services.league_time import league_today
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
 
 @router.post("/upcoming/run", response_model=UpcomingPredictionRunResponse)
 def run_upcoming(
-    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq)"),
+    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq|nhl)"),
     date: dt.date | None = Query(default=None, description="Target date YYYY-MM-DD"),
     db: Session = Depends(get_db),
 ) -> UpcomingPredictionRunResponse:
@@ -53,11 +55,11 @@ def run_upcoming(
     except DataBackendError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    target_date = date or (dt.date.today() + dt.timedelta(days=1))
+    target_date = date or (league_today(normalized_league) + dt.timedelta(days=1))
 
     try:
         stats = run_upcoming_predictions(db, target_date, league_code=normalized_league)
-    except HockeyTechClientError as exc:
+    except (HockeyTechClientError, NhlClientError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ModelNotAvailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

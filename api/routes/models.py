@@ -27,7 +27,7 @@ router = APIRouter(prefix="/models", tags=["models"])
 
 @router.get("/active", response_model=ModelStatusResponse)
 def active_model(
-    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq)"),
+    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq|nhl)"),
 ) -> ModelStatusResponse:
     try:
         normalized_league = require_supported_league_code(league_code)
@@ -42,7 +42,7 @@ def active_model(
 @router.post("/train", response_model=ModelTrainResponse)
 def train_model(
     promote: bool = Query(default=True),
-    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq)"),
+    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq|nhl)"),
 ) -> ModelTrainResponse:
     try:
         normalized_league = require_supported_league_code(league_code)
@@ -61,7 +61,7 @@ def train_model(
 @router.post("/compare/run", response_model=ModelCompareRunResponse)
 def compare_models(
     request: ModelCompareRunRequest,
-    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq)"),
+    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq|nhl)"),
     db: Session = Depends(get_db),
 ) -> ModelCompareRunResponse:
     try:
@@ -94,7 +94,7 @@ def compare_models(
 @router.get("/compare/report/{run_id}", response_model=ModelCompareReportResponse)
 def compare_report(
     run_id: str,
-    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq)"),
+    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq|nhl)"),
     db: Session = Depends(get_db),
 ) -> ModelCompareReportResponse:
     try:

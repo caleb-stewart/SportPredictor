@@ -9,7 +9,7 @@ from services.prediction_pipeline import run_daily_pipeline
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the daily prediction pipeline.")
-    parser.add_argument("--league-code", default="whl", help="League code (whl|ohl|lhjmq).")
+    parser.add_argument("--league-code", default="whl", help="League code (whl|ohl|lhjmq|nhl).")
     args = parser.parse_args()
 
     db = SessionLocal()

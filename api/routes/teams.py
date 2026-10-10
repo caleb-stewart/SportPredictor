@@ -20,7 +20,7 @@ router = APIRouter(prefix="/teams", tags=["teams"])
 
 @router.get("", response_model=list[TeamResponse])
 def list_teams(
-    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq)"),
+    league_code: str = Query(default="whl", description="League code (whl|ohl|lhjmq|nhl)"),
     active_only: bool = Query(default=True),
     db: Session = Depends(get_db),
 ) -> list[TeamResponse]:

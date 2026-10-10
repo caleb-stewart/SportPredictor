@@ -370,6 +370,11 @@ def upsert_upcoming_schedule(
     league_code: str | None = None,
 ) -> int:
     normalized_league, stores = _resolve_write_stores(db, league_code)
+    if normalized_league == "nhl":
+        from services.nhl_ingest import upsert_nhl_schedule
+
+        return upsert_nhl_schedule(db, target_date)
+
     client = HockeyTechClient(
         client_code=hockeytech_client_code_for_league(normalized_league),
         api_key=hockeytech_api_key_for_league(normalized_league),
@@ -413,6 +418,13 @@ def update_completed_games(
     league_code: str | None = None,
 ) -> int:
     normalized_league, stores = _resolve_write_stores(db, league_code)
+    if normalized_league == "nhl":
+        from services.nhl_ingest import update_nhl_completed_games
+
+        updated = update_nhl_completed_games(db, target_date)
+        _update_prediction_record_correctness(db, target_date, league_code=normalized_league)
+        return updated
+
     client = HockeyTechClient(
         client_code=hockeytech_client_code_for_league(normalized_league),
         api_key=hockeytech_api_key_for_league(normalized_league),
@@ -646,52 +658,102 @@ def recompute_rolling_averages(
 
         teams_stmt = apply_league_scope(select(team_model), team_model, league_id)
         teams = db.scalars(teams_stmt).all()
+        if not teams:
+            continue
+
+        games_stmt = apply_league_scope(
+            select(game_model)
+            .where(game_model.game_date.is_not(None))
+            .order_by(game_model.game_date, game_model.game_id),
+            game_model,
+            league_id,
+        )
+        league_games = [
+            game
+            for game in db.scalars(games_stmt).all()
+            if all(
+                getattr(game, field) is not None
+                for field in (
+                    "home_goal_count",
+                    "away_goal_count",
+                    "home_power_play_percentage",
+                    "away_power_play_percentage",
+                    "home_faceoff_win_percentage",
+                    "away_faceoff_win_percentage",
+                    "home_shots_on_goal_total",
+                    "away_shots_on_goal_total",
+                )
+            )
+        ]
+        if not league_games:
+            continue
+
+        games_by_team_provider_id: dict[int, list[Any]] = {}
+        for team in teams:
+            if team.hockeytech_id is None:
+                continue
+            games_by_team_provider_id[int(team.hockeytech_id)] = []
+
+        for game in league_games:
+            if game.home_team_id is not None:
+                home_provider_id = int(game.home_team_id)
+                if home_provider_id in games_by_team_provider_id:
+                    games_by_team_provider_id[home_provider_id].append(game)
+            if game.away_team_id is not None:
+                away_provider_id = int(game.away_team_id)
+                if away_provider_id in games_by_team_provider_id:
+                    games_by_team_provider_id[away_provider_id].append(game)
 
         for team in teams:
-            games_stmt = (
-                select(game_model)
-                .where(or_(game_model.home_team_id == team.hockeytech_id, game_model.away_team_id == team.hockeytech_id))
-                .where(game_model.game_date.is_not(None))
-                .order_by(game_model.game_date, game_model.game_id)
-            )
-            games_stmt = apply_league_scope(games_stmt, game_model, league_id)
-            games = db.scalars(games_stmt).all()
+            if team.hockeytech_id is None:
+                continue
+            games = games_by_team_provider_id.get(int(team.hockeytech_id), [])
+            if not games:
+                continue
+
+            target_goals: list[float] = []
+            target_ppp: list[float] = []
+            target_sog: list[float] = []
+            target_fowp: list[float] = []
+            opp_goals: list[float] = []
+            opp_ppp: list[float] = []
+            opp_sog: list[float] = []
+            opp_fowp: list[float] = []
+            is_home_flags: list[bool] = []
+
+            team_provider_id = int(team.hockeytech_id)
+            for game in games:
+                is_home = game.home_team_id == team_provider_id
+                is_home_flags.append(is_home)
+                target_goals.append(_to_float(game.home_goal_count if is_home else game.away_goal_count, default=0.0))
+                opp_goals.append(_to_float(game.away_goal_count if is_home else game.home_goal_count, default=0.0))
+                target_ppp.append(_to_float(game.home_power_play_percentage if is_home else game.away_power_play_percentage, default=0.0))
+                opp_ppp.append(_to_float(game.away_power_play_percentage if is_home else game.home_power_play_percentage, default=0.0))
+                target_sog.append(_to_float(game.home_shots_on_goal_total if is_home else game.away_shots_on_goal_total, default=0.0))
+                opp_sog.append(_to_float(game.away_shots_on_goal_total if is_home else game.home_shots_on_goal_total, default=0.0))
+                target_fowp.append(_to_float(game.home_faceoff_win_percentage if is_home else game.away_faceoff_win_percentage, default=0.0))
+                opp_fowp.append(_to_float(game.away_faceoff_win_percentage if is_home else game.home_faceoff_win_percentage, default=0.0))
 
             for idx, game in enumerate(games):
                 for k in k_targets:
-                    if idx < k:
+                    # The source tables contain calendar dates but not a
+                    # trustworthy start time for every game.  Same-day games
+                    # therefore share one pregame snapshot; their results are
+                    # not eligible for one another's rolling window.
+                    prior_indices = [
+                        prior_idx
+                        for prior_idx in range(idx)
+                        if games[prior_idx].game_date < game.game_date
+                    ]
+                    if len(prior_indices) < k:
                         continue
 
-                    window = games[idx - k : idx]
+                    window_indices = prior_indices[-k:]
 
-                    target_goals: list[float] = []
-                    target_ppp: list[float] = []
-                    target_sog: list[float] = []
-                    target_fowp: list[float] = []
+                    def avg_for_window(values: list[float]) -> float:
+                        return float(sum(values[prior_idx] for prior_idx in window_indices) / float(k))
 
-                    opp_goals: list[float] = []
-                    opp_ppp: list[float] = []
-                    opp_sog: list[float] = []
-                    opp_fowp: list[float] = []
-
-                    for g in window:
-                        is_home = g.home_team_id == team.hockeytech_id
-                        target_goals.append(_to_float(g.home_goal_count if is_home else g.away_goal_count, default=0.0))
-                        opp_goals.append(_to_float(g.away_goal_count if is_home else g.home_goal_count, default=0.0))
-
-                        target_ppp.append(_to_float(g.home_power_play_percentage if is_home else g.away_power_play_percentage, default=0.0))
-                        opp_ppp.append(_to_float(g.away_power_play_percentage if is_home else g.home_power_play_percentage, default=0.0))
-
-                        target_sog.append(_to_float(g.home_shots_on_goal_total if is_home else g.away_shots_on_goal_total, default=0.0))
-                        opp_sog.append(_to_float(g.away_shots_on_goal_total if is_home else g.home_shots_on_goal_total, default=0.0))
-
-                        target_fowp.append(_to_float(g.home_faceoff_win_percentage if is_home else g.away_faceoff_win_percentage, default=0.0))
-                        opp_fowp.append(_to_float(g.away_faceoff_win_percentage if is_home else g.home_faceoff_win_percentage, default=0.0))
-
-                    def avg(values: list[float]) -> float:
-                        return sum(values) / len(values) if values else 0.0
-
-                    is_home = game.home_team_id == team.hockeytech_id
+                    is_home = is_home_flags[idx]
                     team_goals = game.home_goal_count if is_home else game.away_goal_count
                     opp_goals_now = game.away_goal_count if is_home else game.home_goal_count
 
@@ -699,23 +761,32 @@ def recompute_rolling_averages(
                     if team_goals is not None and opp_goals_now is not None:
                         target_win = 1 if team_goals > opp_goals_now else 0
 
+                    goals_for_avg = avg_for_window(target_goals)
+                    goals_against_avg = avg_for_window(opp_goals)
+                    shots_for_avg = avg_for_window(target_sog)
+                    shots_against_avg = avg_for_window(opp_sog)
+                    power_play_percentage_avg = avg_for_window(target_ppp)
+                    power_play_percentage_against_avg = avg_for_window(opp_ppp)
+                    faceoff_win_percentage_avg = avg_for_window(target_fowp)
+                    faceoff_win_percentage_against_avg = avg_for_window(opp_fowp)
+
                     row_data = {
                         "game_id": game.game_id,
                         store.rolling_team_id_field: team.id,
                         "k_value": k,
-                        "goals_for_avg": avg(target_goals),
-                        "goals_against_avg": avg(opp_goals),
-                        "shots_for_avg": avg(target_sog),
-                        "shots_against_avg": avg(opp_sog),
-                        "power_play_percentage_avg": avg(target_ppp),
-                        "power_play_percentage_against_avg": avg(opp_ppp),
-                        "faceoff_win_percentage_avg": avg(target_fowp),
-                        "faceoff_win_percentage_against_avg": avg(opp_fowp),
+                        "goals_for_avg": goals_for_avg,
+                        "goals_against_avg": goals_against_avg,
+                        "shots_for_avg": shots_for_avg,
+                        "shots_against_avg": shots_against_avg,
+                        "power_play_percentage_avg": power_play_percentage_avg,
+                        "power_play_percentage_against_avg": power_play_percentage_against_avg,
+                        "faceoff_win_percentage_avg": faceoff_win_percentage_avg,
+                        "faceoff_win_percentage_against_avg": faceoff_win_percentage_against_avg,
                         "home_away": 1 if is_home else 0,
-                        "goals_diff": avg(target_goals) - avg(opp_goals),
-                        "ppp_diff": avg(target_ppp) - avg(opp_ppp),
-                        "sog_diff": avg(target_sog) - avg(opp_sog),
-                        "fowp_diff": avg(target_fowp) - avg(opp_fowp),
+                        "goals_diff": goals_for_avg - goals_against_avg,
+                        "ppp_diff": power_play_percentage_avg - power_play_percentage_against_avg,
+                        "sog_diff": shots_for_avg - shots_against_avg,
+                        "fowp_diff": faceoff_win_percentage_avg - faceoff_win_percentage_against_avg,
                         "target_win": target_win,
                         "created_at": now,
                         "updated_at": now,
@@ -1081,10 +1152,14 @@ def run_daily_pipeline(
     league_code: str | None = None,
 ) -> dict[str, Any]:
     normalized = require_supported_league_code(league_code)
-    today = run_date or dt.date.today()
+    from services.league_time import league_today
+    from services.team_sync import sync_missing_teams_for_league
+
+    today = run_date or league_today(normalized)
     tomorrow = today + dt.timedelta(days=1)
     yesterday = today - dt.timedelta(days=1)
 
+    sync_missing_teams_for_league(db, normalized, dry_run=False)
     schedule_rows = upsert_upcoming_schedule(db, tomorrow, league_code=normalized)
     completed_rows = update_completed_games(db, yesterday, league_code=normalized)
     rolling_rows = recompute_rolling_averages(db, league_code=normalized)

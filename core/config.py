@@ -33,6 +33,19 @@ class Settings(BaseSettings):
     chl_ingest_retry_max: int = 5
     chl_ingest_timeout_seconds: int = 30
 
+    the_odds_api_key: str = Field(default="", alias="THE_ODDS_API_KEY")
+    the_odds_api_base_url: str = "https://api.the-odds-api.com"
+    the_odds_api_regions: str = "us"
+    the_odds_api_markets: str = "h2h,spreads,totals"
+    the_odds_api_current_sports: str = "icehockey_nhl"
+    the_odds_api_timeout_seconds: int = 30
+    the_odds_api_current_sync_enabled: bool = True
+    the_odds_api_current_sync_interval_minutes: int = 360
+    nhl_api_base_url: str = "https://api-web.nhle.com"
+    nhl_report_base_url: str = "https://www.nhl.com/scores/htmlreports"
+    nhl_ingest_rps_limit: float = 3.0
+    nhl_ingest_timeout_seconds: int = 30
+
     scheduler_enabled: bool = True
     scheduler_timezone: str = "America/Los_Angeles"
     upcoming_prediction_refresh_minutes: int = Field(default=30, alias="UPCOMING_PREDICTION_REFRESH_MINUTES")

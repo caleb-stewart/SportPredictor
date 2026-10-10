@@ -58,6 +58,16 @@ CHL_LEAGUES: dict[str, dict[str, Any]] = {
         "timezone": "America/Halifax",
         "active": True,
     },
+    "nhl": {
+        "id": 4,
+        "code": "nhl",
+        "name": "National Hockey League",
+        "sport": "hockey",
+        "provider": "nhl_api",
+        "provider_league_code": "nhl",
+        "timezone": "America/New_York",
+        "active": True,
+    },
 }
 
 

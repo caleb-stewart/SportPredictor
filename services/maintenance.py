@@ -23,6 +23,7 @@ from services.prediction_pipeline import (
     upsert_upcoming_schedule,
 )
 from services.league_time import league_today as _shared_league_today
+from services.team_sync import sync_missing_teams_for_league
 
 LOGGER = logging.getLogger(__name__)
 
@@ -150,6 +151,8 @@ def run_day_maintenance(
     schedule_target = run_date + dt.timedelta(days=1)
     completed_target = run_date - dt.timedelta(days=1)
 
+    # Ensure provider-team references exist before we write new predictions.
+    sync_missing_teams_for_league(db, normalized, dry_run=False)
     schedule_rows = int(upsert_upcoming_schedule(db, schedule_target, league_code=normalized))
     completed_rows = int(update_completed_games(db, completed_target, league_code=normalized))
     rolling_rows = int(recompute_rolling_averages(db, league_code=normalized))
