@@ -96,6 +96,8 @@ class PredictedGameResponse(BaseModel):
     consensus_predicted_winner_db_team_id: Optional[int]
     consensus_predicted_winner_provider_team_id: Optional[int]
     consensus_predicted_winner_name: Optional[str]
+    consensus_home_probability: Optional[float] = None
+    consensus_away_probability: Optional[float] = None
     consensus_correct: Optional[bool]
     resolved_count: int
     correct_count: int
@@ -192,6 +194,8 @@ class LeagueGameDetailResponse(BaseModel):
     consensus_predicted_winner_db_team_id: Optional[int]
     consensus_predicted_winner_provider_team_id: Optional[int]
     consensus_predicted_winner_name: Optional[str]
+    consensus_home_probability: Optional[float] = None
+    consensus_away_probability: Optional[float] = None
     consensus_correct: Optional[bool]
 
 
