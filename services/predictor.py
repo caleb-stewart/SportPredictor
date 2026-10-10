@@ -130,7 +130,15 @@ def _model_version_roots(league_code: str | None = None) -> list[Path]:
     scoped_root = _model_root_for_league(league_code)
     roots = [scoped_root]
     if normalize_league_code(league_code) == "whl":
-        roots.extend([base_root, base_root.parent / "whl_v3_baseline", base_root.parent / "whl_v4"])
+        roots.extend(
+            [
+                base_root,
+                base_root / "whl_v3_baseline",
+                base_root / "whl_v4",
+                base_root.parent / "whl_v3_baseline",
+                base_root.parent / "whl_v4",
+            ]
+        )
 
     unique: list[Path] = []
     for root in roots:
